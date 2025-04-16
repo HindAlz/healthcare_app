@@ -1,0 +1,2 @@
+appointment_id,date,time,patient_id,staff_id,type,meeting_link
+1,2025-04-15,09:00:00,1,3,Consultation,https://meet.example.com/3/1
