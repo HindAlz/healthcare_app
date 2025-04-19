@@ -171,7 +171,7 @@ def schedule_appointment(user):
                             appointments.to_csv(APPOINTMENTS_FILE, index=False)
                             st.success("Appointment updated!")
                             del st.session_state.modify_appt_id
-                            st.experimental_rerun()  # Reload the page to reflect changes
+                            st.rerun()  # Reload the page to reflect changes
 
     st.markdown("---")
 
@@ -214,7 +214,7 @@ def schedule_appointment(user):
                 appointments.to_csv(APPOINTMENTS_FILE, index=False)
                 st.success("Appointment booked successfully!")
                 st.session_state.show_booking_form = False  # Hide the form after submission
-                st.experimental_rerun()  # Reload the page to show the new appointment
+                st.rerun()  # Reload the page to show the new appointment
 
 
 # View Medical History
@@ -256,10 +256,16 @@ def pay_bill(appointment_id, amount):
     st.write(f"Proceeding to pay ${amount} for appointment ID {appointment_id}.")
     # Integrate billing API for secure transaction handling
     st.success("Payment successful!")
+import pandas as pd
+
+
+def save_users(users_df):
+    users_df.to_csv(USERS_FILE, index=False)
 
 def update_personal_info(user):
     st.subheader("Update Personal Information")
 
+    # Create input fields for updating personal info
     name = st.text_input("Name", user.get("name", ""))
     email = st.text_input("Email", user.get("email", ""))
     birthday = st.date_input("Birthday", datetime.datetime.strptime(user.get("birthday", "2000-01-01"), "%Y-%m-%d"))
@@ -270,9 +276,24 @@ def update_personal_info(user):
         st.session_state.user["email"] = email
         st.session_state.user["birthday"] = str(birthday)
 
-        # Optionally, update the user in a database or user file
-        # For now just show success
-        st.success("Your information has been updated.")
+        # Load users from the CSV
+        users = load_users()
+
+        # Find the user by their user_id
+        user_idx = users[users["user_id"] == user["user_id"]].index
+
+        if not user_idx.empty:
+            # Update the user's information
+            users.loc[user_idx, "name"] = name
+            users.loc[user_idx, "email"] = email
+            users.loc[user_idx, "birthday"] = str(birthday)
+
+            # Save the updated user data back to the CSV
+            save_users(users)
+
+            st.success("Your information has been updated.")
+        else:
+            st.error("User not found in the system.")
 
 # Modify Appointment
 def modify_appointment(appointment_id):
