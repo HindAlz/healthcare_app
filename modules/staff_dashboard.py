@@ -163,7 +163,8 @@ def end_appointment(appointment):
             "appointment_type": appointment["type"],
             "insurance_level": insurance_level,
             "amount": final_bill,
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "status":"pending"
         }
 
         # Save to CSV

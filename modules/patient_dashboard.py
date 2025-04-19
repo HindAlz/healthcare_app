@@ -218,17 +218,24 @@ def schedule_appointment(user):
 
 
 # View Medical History
+import pandas as pd
+
 def view_medical_history(user):
     st.subheader("Your Medical History")
 
-    medical_history = load_medical_history()
+    # Load medical history from the CSV file
+    medical_history = pd.read_csv('data/logs.csv')
+
+    # Filter the medical history for the specific user based on their patient_id
     patient_history = medical_history[medical_history['patient_id'] == user['user_id']]
 
     if patient_history.empty:
         st.write("No medical history available.")
     else:
         st.write("Your Medical History:")
-        st.write(patient_history[["appointment_id", "date", "summary", "test_results"]])
+        # Only display the 'summary' column for the user
+        st.write(patient_history[["summary"]])
+
 import os
 
 # Function to save updated billing data
