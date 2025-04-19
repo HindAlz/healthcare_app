@@ -1,6 +1,6 @@
 user_id,username,password,role,name,birthday,email,position,specialization,schedule
 1,Hind,305c9300cf5db48ac19c509df14676c28ed9f4dea6c0a4369d1faeccf93b1df7,Patient,h,2025-04-15,nanya,,,
 2,HindAdmin,305c9300cf5db48ac19c509df14676c28ed9f4dea6c0a4369d1faeccf93b1df7,Admin,HindAdmin,2025-04-15,h,d,,
-3,HindStaff,305c9300cf5db48ac19c509df14676c28ed9f4dea6c0a4369d1faeccf93b1df7,Staff,HindStaff,2025-04-15,h,Doctor,Radiology,9-5
+3,HindStaff,305c9300cf5db48ac19c509df14676c28ed9f4dea6c0a4369d1faeccf93b1df7,Staff,HindStaff,2025-04-15,h,Doctor,Radiology,9-6
 4,Raghad,305c9300cf5db48ac19c509df14676c28ed9f4dea6c0a4369d1faeccf93b1df7,Patient,Raghad,2015-04-21,email,,,
 5,HindER,305c9300cf5db48ac19c509df14676c28ed9f4dea6c0a4369d1faeccf93b1df7,ER,HindER,2025-04-19,j,q,,

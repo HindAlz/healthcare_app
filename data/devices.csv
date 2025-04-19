@@ -1,0 +1,4 @@
+device_id,name,available,next_maintenance,low_available
+dev001,X-ray Machine,3,2025-05-01,5
+dev002,ECG Machine,5,2025-07-01,5
+dev003,Ultrasound,2,2025-04-25,5

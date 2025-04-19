@@ -1,261 +1,596 @@
 import streamlit as st
 import pandas as pd
+from datetime import datetime
+import os
 
 # File paths
-USER_FILE = "data/users.csv"
-RESOURCE_FILE = "data/resources.csv"
+APPOINTMENTS_FILE = "data/appointments.csv"
+MEDICAL_HISTORY_FILE = "data/medical_history.csv"
+BILLING_FILE = "data/bills.csv"
+USERS_FILE = "data/users.csv"
+LOGS_FILE = os.path.join("data", "logs.csv")
 
-
-# Load users (for staff management)
+# Load data functions
 def load_users():
     try:
-        return pd.read_csv(USER_FILE)
+        return pd.read_csv(USERS_FILE)
     except:
+        return pd.DataFrame(columns=["user_id", "username", "password", "role", "name", "birthday", "email", "position", "specialization", "schedule"])
+
+def load_appointments():
+    try:
+        return pd.read_csv(APPOINTMENTS_FILE)
+    except:
+        return pd.DataFrame(columns=["appointment_id", "staff_id", "patient_id", "date", "time", "type", "meeting_link"])
+
+def load_patient_data():
+    try:
+        users = load_users()
+        return users[users['role'].str.lower() == 'patient'][["user_id", "name", "birthday", "email"]].rename(columns={"user_id": "patient_id"})
+    except:
+        return pd.DataFrame(columns=["patient_id", "name", "birthday", "email"])
+
+def load_staff_data():
+    try:
+        users = load_users()
+        staff = users[users['role'].str.lower() == 'staff']
+        staff = staff.rename(columns={
+            "user_id": "staff_id",
+            "schedule": "working_hours",
+            "position": "title"
+        })
+        return staff[["staff_id", "name", "specialization", "working_hours", "title", "email", "birthday"]]
+    except:
+        return pd.DataFrame(columns=["staff_id", "name", "specialization", "working_hours", "title", "email", "birthday"])
+
+def load_medical_history():
+    try:
+        return pd.read_csv(MEDICAL_HISTORY_FILE)
+    except:
+        return pd.DataFrame(columns=["patient_id", "appointment_id", "date", "summary", "test_results"])
+
+def load_billing():
+    try:
+        return pd.read_csv(BILLING_FILE)
+    except:
+        return pd.DataFrame(columns=["bill_id","patient_id", "appointment_id","appointment_type", "bill_status","insurance_level", "amount","date","status"])
+
+def load_logs():
+    try:
+        return pd.read_csv(LOGS_FILE)
+    except:
+        return pd.DataFrame(columns=["patient_id", "date", "summary", "details"])
+
+# Dummy resource data
+def load_medications():
+    return pd.DataFrame([{"med_id": "M001", "stock": 5, "expiry_date": "2025-05-01"}])
+
+def load_devices():
+    return pd.DataFrame([{"device_id": "D001", "available": 3, "next_maintenance": "2025-05-15"}])
+
+def load_consumables():
+    return pd.DataFrame([{"consumable_id": "C001", "stock": 6, "expiry_date": "2025-05-10"}])
+
+# --- Admin Dashboard ---
+def admin_dashboard():
+    st.title("Admin Dashboard")
+
+    # Default selected page
+    if "selected_page" not in st.session_state:
+        st.session_state.selected_page = None
+
+    # Navigation buttons
+    if st.session_state.selected_page is None:
+        col1, col2, col3 = st.columns(3)
+        if col1.button("Staff Management"):
+            st.session_state.selected_page = "staff_management"
+            st.rerun()  # <== Force rerun after setting
+        if col2.button("Patient Management"):
+            st.session_state.selected_page = "patient_management"
+            st.rerun()
+        if col3.button("Resource Management"):
+            st.session_state.selected_page = "resource_management"
+            st.rerun()
+
+    # Render selected section
+    if st.session_state.selected_page == "staff_management":
+        staff_management()
+    elif st.session_state.selected_page == "patient_management":
+        patient_management()
+    elif st.session_state.selected_page == "resource_management":
+        resource_management()
+
+
+
+# Path to the CSV file
+
+
+# Function to save data back to CSV
+def save_users(df):
+    df.to_csv(USERS_FILE, index=False)
+
+
+import pandas as pd
+import streamlit as st
+
+# Path to the CSV file
+USERS_FILE = "data/users.csv"
+
+
+# Load data
+def load_users():
+    try:
+        return pd.read_csv(USERS_FILE)
+    except FileNotFoundError:
         return pd.DataFrame(columns=["user_id", "username", "password", "role", "name", "birthday", "email", "position",
                                      "specialization", "schedule"])
 
 
-# Admin dashboard
-def admin_dashboard():
-    st.title("Admin Dashboard")
-
-    # Admin-only functionality
-    if st.session_state.user["role"] != "Admin":
-        st.error("Access Denied: You are not authorized to view this page.")
-        return
-
-    st.sidebar.subheader("Admin Controls")
-    choice = st.sidebar.selectbox("Manage", ["Staff Management", "Patient Management", "Resource Management"])
-
-    if choice == "Staff Management":
-        staff_management()
-
-    if choice == "Patient Management":
-        patient_management()
-
-    if choice == "Resource Management":
-        resource_management()
+# Function to save data back to CSV
+def save_users(df):
+    df.to_csv(USERS_FILE, index=False)
 
 
-# Staff Management functionality
+# --- Staff Management ---
 def staff_management():
-    users = load_users()
-    staff_members = users[users['role'] == 'Staff']
+    # Initialize session state variables
+    if "show_add_staff_form" not in st.session_state:
+        st.session_state.show_add_staff_form = False
+    if "show_staff_info" not in st.session_state:
+        st.session_state.show_staff_info = False
+    if "selected_staff_id" not in st.session_state:
+        st.session_state.selected_staff_id = None
 
-    st.subheader("Staff Management")
-    st.write(staff_members[["user_id", "username", "name", "position", "specialization"]])
+    # Return to Dashboard Button
+    if st.button("🔙 Return to Dashboard"):
+        st.session_state.selected_page = None
+        st.stop()
 
-    staff_id = st.text_input("Search Staff ID to Edit or Delete")
-    if staff_id:
-        staff = staff_members[staff_members["user_id"] == int(staff_id)]
-        if not staff.empty:
-            st.write(staff)
-            # Edit staff info
-            position = st.text_input("Position", staff.iloc[0]["position"])
-            specialization = st.text_input("Specialization", staff.iloc[0]["specialization"])
-            schedule = st.text_input("Schedule", staff.iloc[0]["schedule"])
-            if st.button("Save Changes"):
-                users.loc[users["user_id"] == int(staff_id), ["position", "specialization", "schedule"]] = [position,
-                                                                                                            specialization,
-                                                                                                            schedule]
-                users.to_csv(USER_FILE, index=False)
-                st.success("Staff updated successfully!")
-        else:
-            st.error("Staff not found.")
+    # Top Row Header + Add Button
+    top1, top2 = st.columns([5, 1])
+    with top1:
+        st.header("Staff Management")
+    with top2:
+        if st.button("➕ Add New Staff"):
+            st.session_state.show_add_staff_form = True
+            st.session_state.show_staff_info = False
+            st.session_state.selected_staff_id = None
 
-import streamlit as st
-import pandas as pd
+    # Load and filter staff
+    df = load_users()
+    staff_df = df[df["role"] == "Staff"]
 
-# File paths
-MEDICATION_FILE = "data/medications.csv"
-DEVICE_FILE = "data/devices.csv"
-CONSUMABLE_FILE = "data/consumables.csv"
-
-
-# Load medications
-def load_medications():
-    try:
-        return pd.read_csv(MEDICATION_FILE)
-    except:
-        return pd.DataFrame(columns=["medication_id", "name", "stock", "expiry_date"])
-
-
-# Load devices
-def load_devices():
-    try:
-        return pd.read_csv(DEVICE_FILE)
-    except:
-        return pd.DataFrame(columns=["device_id", "name", "amount_available", "next_maintenance_date"])
-
-
-# Load consumables
-def load_consumables():
-    try:
-        return pd.read_csv(CONSUMABLE_FILE)
-    except:
-        return pd.DataFrame(columns=["consumable_id", "name", "stock", "expiry_date"])
-
-
-# Resource Management page
-def resource_management():
-    st.title("Resource Management")
-
-    # Load user and check if role is admin
-    user = st.session_state.user
-    if user["role"] != "Admin":
-        st.error("Access Denied: You are not authorized to view this page.")
-        return
-
-    st.sidebar.subheader("Resource Controls")
-    choice = st.sidebar.selectbox("Choose a resource to manage", ["Medications", "Devices", "Consumables"])
-
-    if choice == "Medications":
-        manage_medications()
-
-    elif choice == "Devices":
-        manage_devices()
-
-    elif choice == "Consumables":
-        manage_consumables()
-
-import streamlit as st
-import pandas as pd
-
-# Dummy patient data (replace with real data or DB connection)
-patients_data = [
-    {"patient_id": "P001", "name": "John Doe"},
-    {"patient_id": "P002", "name": "Jane Smith"},
-    {"patient_id": "P003", "name": "Ahmed Ali"}
-]
-
-appointments_data = {
-    "P001": [
-        {"appointment_id": "A101", "date": "2025-04-10", "type": "General Checkup", "status": "Paid"},
-        {"appointment_id": "A102", "date": "2025-04-20", "type": "Diabetes Follow-up", "status": "In Progress"}
-    ],
-    "P002": [
-        {"appointment_id": "A103", "date": "2025-03-15", "type": "Heart Screening", "status": "Paid"}
-    ],
-    "P003": [
-        {"appointment_id": "A104", "date": "2025-04-01", "type": "ER Visit", "status": "Paid"},
-        {"appointment_id": "A105", "date": "2025-04-12", "type": "Follow-up", "status": "In Progress"}
-    ]
-}
-
-def patient_management():
-    st.subheader("Patient Management")
-
-    # Search bar
-    search_id = st.text_input("Search by Patient ID")
-
-    # Convert patient data to DataFrame
-    df_patients = pd.DataFrame(patients_data)
-
-    # Filtered display
-    if search_id:
-        df_patients = df_patients[df_patients["patient_id"].str.contains(search_id, case=False)]
-
-    # Show patient list
-    st.write("Patient List")
-    st.dataframe(df_patients)
-
-    # Select patient by ID
-    selected_patient_id = st.selectbox("Select Patient ID", [p["patient_id"] for p in patients_data])
-    st.write(f"Showing data for Patient ID: {selected_patient_id}")
-
-    # Display appointment & billing history
-    if selected_patient_id in appointments_data:
-        st.markdown("### Past Appointments and Billing")
-        df_appointments = pd.DataFrame(appointments_data[selected_patient_id])
-        st.table(df_appointments)
+    # --- Staff Table + Selection ---
+    search = st.text_input("Search Staff by ID or Name").lower()
+    if search:
+        staff_filtered = staff_df[
+            staff_df["user_id"].str.contains(search) | staff_df["name"].str.lower().str.contains(search)
+            ]
     else:
-        st.info("No appointment records found for this patient.")
+        staff_filtered = staff_df
 
-    # Return button to go back to admin dashboard
-    if st.button("Return to Admin Dashboard"):
-        st.session_state["admin_page"] = "main"
+    st.dataframe(staff_filtered[["user_id", "name", "specialization", "schedule"]], use_container_width=True)
+
+    # Select staff to view/edit
+    staff_ids = staff_filtered["user_id"].tolist()
+    selected = st.selectbox("Select a Staff ID", staff_ids, key="select_staff_id")
+    if st.button("View Info"):
+        st.session_state.selected_staff_id = selected
+        st.session_state.show_staff_info = True
+        st.session_state.show_add_staff_form = False
+
+    # --- View/Edit Staff Info ---
+    if st.session_state.show_staff_info and st.session_state.selected_staff_id:
+        staff = staff_df[staff_df["user_id"] == st.session_state.selected_staff_id].iloc[0]
+        st.subheader(f"Staff Info: {staff['name']}")
+
+        with st.form("edit_staff_form"):
+            name = st.text_input("Name", value=staff["name"])
+            specialization = st.text_input("Specialization", value=staff["specialization"])
+            schedule = st.text_input("Schedule", value=staff["schedule"])
+            email = st.text_input("Email", value=staff["email"])
+            submit_edit = st.form_submit_button("💾 Save Changes")
+
+            if submit_edit:
+                df.loc[df["user_id"] == staff["user_id"], "name"] = name
+                df.loc[df["user_id"] == staff["user_id"], "specialization"] = specialization
+                df.loc[df["user_id"] == staff["user_id"], "schedule"] = schedule
+                df.loc[df["user_id"] == staff["user_id"], "email"] = email
+                save_users(df)
+                st.success("✅ Staff info updated.")
+                st.session_state.show_staff_info = False
+                st.session_state.selected_staff_id = None
+                st.rerun()
+
+    # --- Add Staff Form ---
+    if st.session_state.show_add_staff_form:
+        st.subheader("Add New Staff")
+        with st.form("new_staff_form"):
+            new_id = st.text_input("User ID")
+            username = st.text_input("Username")
+            password = st.text_input("Password (hashed)")
+            name = st.text_input("Name")
+            birthday = st.date_input("Birthday")
+            email = st.text_input("Email")
+            position = st.text_input("Position")
+            specialization = st.text_input("Specialization")
+            schedule = st.text_input("Schedule")
+            submit = st.form_submit_button("➕ Add Staff")
+
+            if submit:
+                new_entry = pd.DataFrame([{
+                    "user_id": new_id,
+                    "username": username,
+                    "password": password,
+                    "role": "Staff",
+                    "name": name,
+                    "birthday": birthday,
+                    "email": email,
+                    "position": position,
+                    "specialization": specialization,
+                    "schedule": schedule
+                }])
+                df = pd.concat([df, new_entry], ignore_index=True)
+                save_users(df)
+                st.success("✅ New staff added.")
+                st.session_state.show_add_staff_form = False
+                st.rerun()
+def patient_management():
+    if st.button("Return to Dashboard - Staff"):
+        st.session_state.selected_page = None
         st.rerun()
 
-# Manage Medications
-def manage_medications():
-    medications = load_medications()
-    st.subheader("Manage Medications")
-    st.write(medications[["medication_id", "name", "stock", "expiry_date"]])
+    st.header("Patient Management")
 
-    # Check for low stock and expiry
-    low_stock = medications[medications["stock"] < 5]
-    expiring = medications[pd.to_datetime(medications["expiry_date"]) < pd.to_datetime("today") + pd.Timedelta(days=30)]
+    # Load data
+    patients = load_patient_data()
+    appointments = load_appointments()
+    billing = load_billing()
 
-    if not low_stock.empty:
-        st.warning("Low stock medications:")
-        st.write(low_stock)
+    if patients.empty:
+        st.warning("No patients found.")
+        return
 
-    if not expiring.empty:
-        st.warning("Medications nearing expiry:")
-        st.write(expiring)
+    # Search functionality
+    search = st.text_input("Search Patient by ID or Name").lower()
+    if search:
+        patients_filtered = patients[
+            patients["patient_id"].str.contains(search) | patients["name"].str.lower().str.contains(search)
+        ]
+    else:
+        patients_filtered = patients
 
-    # Option to restock
-    medication_id = st.text_input("Enter Medication ID to Restock")
-    if medication_id:
-        restock_quantity = st.number_input("Quantity to Restock", min_value=1)
-        if st.button("Restock"):
-            medications.loc[medications["medication_id"] == int(medication_id), "stock"] += restock_quantity
-            medications.to_csv(MEDICATION_FILE, index=False)
-            st.success(f"Medication {medication_id} restocked successfully!")
+    # Display patient data
+    st.dataframe(patients_filtered[["patient_id", "name", "birthday", "email"]], use_container_width=True)
 
+    # Select a patient to view more details
+    patient_ids = patients_filtered["patient_id"].tolist()
+    selected = st.selectbox("Select a Patient ID", patient_ids, key="patient_select")
 
-# Manage Devices
-def manage_devices():
-    devices = load_devices()
-    st.subheader("Manage Devices")
-    st.write(devices[["device_id", "name", "amount_available", "next_maintenance_date"]])
+    if selected:
+        patient_appointments = appointments[appointments["patient_id"] == selected]
+        patient_billing = billing[billing["patient_id"] == selected]
 
-    # Check for low stock and maintenance
-    low_stock = devices[devices["amount_available"] < 3]
-    maintenance_due = devices[
-        pd.to_datetime(devices["next_maintenance_date"]) < pd.to_datetime("today") + pd.Timedelta(days=30)]
+        if patient_appointments.empty:
+            st.info("No appointments found for this patient.")
+        else:
+            st.subheader("Appointment History")
 
-    if not low_stock.empty:
-        st.warning("Devices with low stock:")
-        st.write(low_stock)
+            # Merge billing info into appointments
+            merged = pd.merge(
+                patient_appointments,
+                patient_billing[["appointment_id", "status"]],
+                on="appointment_id",
+                how="left"
+            ).rename(columns={"status": "Payment Status"})
 
-    if not maintenance_due.empty:
-        st.warning("Devices nearing maintenance:")
-        st.write(maintenance_due)
+            # Display each appointment with status and download option if paid
+            for _, row in merged.iterrows():
+                with st.expander(f"Appointment ID: {row['appointment_id']} — {row['date']}"):
+                    st.write(f"**Type:** {row['type']}")
+                    st.write(f"**Time:** {row['time']}")
+                    status = row["Payment Status"] if pd.notna(row["Payment Status"]) else "Unpaid"
+                    st.write(f"**Payment Status:** {status}")
 
-    # Option to restock devices
-    device_id = st.text_input("Enter Device ID to Restock")
-    if device_id:
-        restock_quantity = st.number_input("Quantity to Restock", min_value=1)
-        if st.button("Restock Device"):
-            devices.loc[devices["device_id"] == int(device_id), "amount_available"] += restock_quantity
-            devices.to_csv(DEVICE_FILE, index=False)
-            st.success(f"Device {device_id} restocked successfully!")
+                    if status.lower() == "paid":
+                        # Create dummy receipt content
+                        receipt_text = f"""
+                        Receipt for Appointment {row['appointment_id']}
+                        --------------------------------------
+                        Patient ID: {selected}
+                        Appointment Date: {row['date']}
+                        Type: {row['type']}
+                        Time: {row['time']}
+                        Status: PAID
+                        """
+                        st.download_button(
+                            label="Download Receipt",
+                            data=receipt_text,
+                            file_name=f"receipt_{row['appointment_id']}.txt",
+                            mime="text/plain"
+                        )
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+import os
 
+# Path to the data folder
+DATA_FOLDER = "data"
 
-# Manage Consumables
-def manage_consumables():
-    consumables = load_consumables()
-    st.subheader("Manage Consumables")
-    st.write(consumables[["consumable_id", "name", "stock", "expiry_date"]])
+# Create the 'data' folder if it doesn't exist
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
 
-    # Check for low stock and expiry
-    low_stock = consumables[consumables["stock"] < 5]
-    expiring = consumables[pd.to_datetime(consumables["expiry_date"]) < pd.to_datetime("today") + pd.Timedelta(days=30)]
+# Function to load data from CSV files
+def load_medications():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "medications.csv"))
 
-    if not low_stock.empty:
-        st.warning("Low stock consumables:")
-        st.write(low_stock)
+def load_devices():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "devices.csv"))
 
-    if not expiring.empty:
-        st.warning("Consumables nearing expiry:")
-        st.write(expiring)
+def load_consumables():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "consumables.csv"))
 
-    # Option to restock consumables
-    consumable_id = st.text_input("Enter Consumable ID to Restock")
-    if consumable_id:
-        restock_quantity = st.number_input("Quantity to Restock", min_value=1)
-        if st.button("Restock Consumable"):
-            consumables.loc[consumables["consumable_id"] == int(consumable_id), "stock"] += restock_quantity
-            consumables.to_csv(CONSUMABLE_FILE, index=False)
-            st.success(f"Consumable {consumable_id} restocked successfully!")
+# --- Resource Management ---
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+import os
+
+# Path to the data folder
+DATA_FOLDER = "data"
+
+# Create the 'data' folder if it doesn't exist
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
+
+# Function to load data from CSV files
+def load_medications():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "medications.csv"))
+
+def load_devices():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "devices.csv"))
+
+def load_consumables():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "consumables.csv"))
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+import os
+
+# Path to the data folder
+DATA_FOLDER = "data"
+
+# Create the 'data' folder if it doesn't exist
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
+
+# Function to load data from CSV files
+def load_medications():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "medications.csv"))
+
+def load_devices():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "devices.csv"))
+
+def load_consumables():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "consumables.csv"))
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+import os
+
+# Path to the data folder
+DATA_FOLDER = "data"
+
+# Create the 'data' folder if it doesn't exist
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
+
+# Function to load data from CSV files
+def load_medications():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "medications.csv"))
+
+def load_devices():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "devices.csv"))
+
+def load_consumables():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "consumables.csv"))
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+import os
+
+# Path to the data folder
+DATA_FOLDER = "data"
+
+# Create the 'data' folder if it doesn't exist
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
+
+# Function to load data from CSV files
+def load_medications():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "medications.csv"))
+
+def load_devices():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "devices.csv"))
+
+def load_consumables():
+    return pd.read_csv(os.path.join(DATA_FOLDER, "consumables.csv"))
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+import os
+
+# Path to the data folder
+DATA_FOLDER = "data"
+
+# Create the 'data' folder if it doesn't exist
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
+import os
+import pandas as pd
+import streamlit as st
+from datetime import datetime
+
+DATA_FOLDER = "data"
+
+def load_medications():
+    path = os.path.join(DATA_FOLDER, "medications.csv")
+    return pd.read_csv(path) if os.path.exists(path) else pd.DataFrame(columns=["med_id", "name", "stock", "expiry_date", "low_stock"])
+
+def load_devices():
+    path = os.path.join(DATA_FOLDER, "devices.csv")
+    return pd.read_csv(path) if os.path.exists(path) else pd.DataFrame(columns=["device_id", "name", "available", "next_maintenance", "low_available"])
+
+def load_consumables():
+    path = os.path.join(DATA_FOLDER, "consumables.csv")
+    return pd.read_csv(path) if os.path.exists(path) else pd.DataFrame(columns=["consumable_id", "name", "stock", "expiry_date", "low_stock"])
+
+def show_add_new_form(resource_type, df, file_path, id_prefix, fields):
+    col1, col2 = st.columns([3, 1])
+    form_key = f"{resource_type.lower()}_form_visible"
+
+    with col2:
+        if st.button(f"➕ Add New {resource_type}", key=f"add_{resource_type}_btn"):
+            st.session_state[form_key] = True
+
+    if st.session_state.get(form_key, False):
+        with st.form(key=f"add_{resource_type}_form"):
+            st.subheader(f"Add New {resource_type}")
+            user_inputs = {}
+            for label, input_type in fields:
+                if input_type == "text":
+                    user_inputs[label] = st.text_input(label)
+                elif input_type == "number":
+                    user_inputs[label] = st.number_input(label, min_value=1)
+                elif input_type == "date":
+                    user_inputs[label] = st.date_input(label)
+
+            submit = st.form_submit_button("Add")
+            if submit:
+                if not df.empty:
+                    last_id = df[df.columns[0]].str.extract(r"(\d+)$").dropna().astype(int).max()[0]
+                    new_id = f"{id_prefix}{last_id + 1:03}"
+                else:
+                    new_id = f"{id_prefix}001"
+
+                data = {df.columns[0]: new_id}
+                i = 1
+                for label, _ in fields:
+                    value = user_inputs[label]
+                    if isinstance(value, datetime):
+                        value = value.strftime("%Y-%m-%d")
+                    data[df.columns[i]] = value
+                    i += 1
+
+                new_df = pd.DataFrame([data])
+                df = pd.concat([df, new_df], ignore_index=True)
+                df.to_csv(file_path, index=False)
+                st.success(f"{resource_type} added with ID {new_id}")
+                st.session_state[form_key] = False
+                st.rerun()
+# --- Resource Management ---
+def resource_management():
+    if st.button("Return to Dashboard - Staff"):
+        st.session_state.selected_page = None
+        st.rerun()
+
+    st.header("Resource Management")
+    option = st.selectbox("Select Resource", ["Medications", "Devices", "Consumables"], key="resource_select")
+    today = datetime.today().date()
+
+    if option == "Medications":
+        meds = load_medications()
+        show_add_new_form(
+            "Medication",
+            meds,
+            "data/medications.csv",
+            "MED",
+            fields=[
+                ("name", "text"),
+                ("stock", "number"),
+                ("expiry_date", "date"),
+                ("low_stock", "number")
+            ]
+        )
+        st.dataframe(meds)
+
+        # Warnings
+        for _, row in meds.iterrows():
+            if row["stock"] < row["low_stock"]:
+                st.warning(f"Low stock for {row['med_id']}")
+            expiry = datetime.strptime(row["expiry_date"], "%Y-%m-%d").date()
+            if (expiry - today).days < 30:
+                st.error(f"Medication {row['med_id']} nearing expiry on {row['expiry_date']}")
+
+        # Individual restock
+        selected = st.selectbox("Select medication to restock", meds["med_id"].tolist(), key="restock_med_select")
+        if st.button("Restock Selected Medication", key="restock_med_btn"):
+            meds.loc[meds["med_id"] == selected, "stock"] = meds.loc[meds["med_id"] == selected, "low_stock"]
+            meds.to_csv("data/medications.csv", index=False)
+            st.success(f"{selected} restocked to threshold.")
+            st.rerun()
+
+    elif option == "Devices":
+        devices = load_devices()
+        show_add_new_form(
+            "Device",
+            devices,
+            "data/devices.csv",
+            "DEV",
+            fields=[
+                ("name", "text"),
+                ("available", "number"),
+                ("next_maintenance", "date"),
+                ("low_available", "number")
+            ]
+        )
+        st.dataframe(devices)
+
+        for _, row in devices.iterrows():
+            if row["available"] < row["low_available"]:
+                st.warning(f"Low availability for {row['device_id']}")
+            next_maint = datetime.strptime(row["next_maintenance"], "%Y-%m-%d").date()
+            if (next_maint - today).days < 30:
+                st.error(f"Device {row['device_id']} needs maintenance soon ({row['next_maintenance']})")
+
+        selected = st.selectbox("Select device to restock", devices["device_id"].tolist(), key="restock_device_select")
+        if st.button("Restock Selected Device", key="restock_device_btn"):
+            devices.loc[devices["device_id"] == selected, "available"] = devices.loc[devices["device_id"] == selected, "low_available"]
+            devices.to_csv("data/devices.csv", index=False)
+            st.success(f"{selected} restocked to threshold.")
+            st.rerun()
+
+    elif option == "Consumables":
+        cons = load_consumables()
+        show_add_new_form(
+            "Consumable",
+            cons,
+            "data/consumables.csv",
+            "CON",
+            fields=[
+                ("name", "text"),
+                ("stock", "number"),
+                ("expiry_date", "date"),
+                ("low_stock", "number")
+            ]
+        )
+        st.dataframe(cons)
+
+        for _, row in cons.iterrows():
+            if row["stock"] < row["low_stock"]:
+                st.warning(f"Low stock for {row['consumable_id']}")
+            expiry = datetime.strptime(row["expiry_date"], "%Y-%m-%d").date()
+            if (expiry - today).days < 30:
+                st.error(f"Consumable {row['consumable_id']} expiring soon ({row['expiry_date']})")
+
+        selected = st.selectbox("Select consumable to restock", cons["consumable_id"].tolist(), key="restock_cons_select")
+        if st.button("Restock Selected Consumable", key="restock_cons_btn"):
+            cons.loc[cons["consumable_id"] == selected, "stock"] = cons.loc[cons["consumable_id"] == selected, "low_stock"]
+            cons.to_csv("data/consumables.csv", index=False)
+            st.success(f"{selected} restocked to threshold.")
+            st.rerun()
+
+# --- Run Dashboard ---
+if __name__ == "__main__":
+    admin_dashboard()

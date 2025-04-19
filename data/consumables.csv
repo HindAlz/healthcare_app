@@ -1,0 +1,4 @@
+consumable_id,name,stock,expiry_date,low_stock
+cons001,Syringes,10,2025-12-31,10
+cons002,Gloves,10,2025-11-01,10
+cons003,Bandages,3,2025-10-15,10
