@@ -5,7 +5,7 @@ import datetime
 # File paths
 APPOINTMENTS_FILE = "data/appointments.csv"
 MEDICAL_HISTORY_FILE = "data/medical_history.csv"
-BILLING_FILE = "data/billing.csv"
+BILLING_FILE = "data/bills.csv"
 
 USERS_FILE = "data/users.csv"
 
@@ -37,7 +37,7 @@ def load_billing():
     try:
         return pd.read_csv(BILLING_FILE)
     except Exception:
-        return pd.DataFrame(columns=["patient_id", "appointment_id", "bill_status", "amount"])
+        return pd.DataFrame(columns=["bill_id","patient_id", "appointment_id","appointment_type", "bill_status","insurance_level", "amount","date","status"])
 
 
 # Patient dashboard
@@ -229,34 +229,66 @@ def view_medical_history(user):
     else:
         st.write("Your Medical History:")
         st.write(patient_history[["appointment_id", "date", "summary", "test_results"]])
+import os
 
+# Function to save updated billing data
+def save_billing(billing_data):
+    billing_data.to_csv(BILLING_FILE, index=False)  # Save the updated DataFrame to the correct path
 
-# Billing and Payment
 def billing_information(user):
     st.subheader("Billing Information")
 
     billing_data = load_billing()
+
+    # Filter the bills related to the logged-in user
     patient_bills = billing_data[billing_data['patient_id'] == user['user_id']]
 
     if patient_bills.empty:
         st.write("No billing information available.")
     else:
-        for index, bill in patient_bills.iterrows():
-            st.write(f"Appointment ID: {bill['appointment_id']}")
-            st.write(f"Bill Status: {bill['bill_status']}")
-            st.write(f"Amount: ${bill['amount']}")
-            if bill["bill_status"] == "Paid":
-                st.write(f"Receipt: [Download Receipt](/path/to/receipt/{bill['appointment_id']})")
-            elif st.button(f"Pay Bill for Appointment {bill['appointment_id']}"):
-                pay_bill(bill['appointment_id'], bill['amount'])
+        for idx, bill in patient_bills.iterrows():
+            mod_key = f"mod_bill_{user['user_id']}_{bill['appointment_id']}_{idx}"  # Add idx to make the key unique
+            with st.expander(f"Bill for Appointment {bill['appointment_id']}"):
+                st.write(f"📅 Appointment ID: **{bill['appointment_id']}**")
+                st.write(f"🧑 Appointment Type: **{bill['appointment_type']}**")
+                st.write(f"💰 Amount: **${bill['amount']}**")
+                st.write(f"📅 Date: **{bill['date']}**")
 
+                # Check if 'status' exists in the DataFrame
+                if 'status' in bill:
+                    st.write(f"🛑 Status: **{bill['status']}**")
+                else:
+                    st.write("🛑 Status: **Unknown**")
+
+                if bill["status"] == "Paid":
+                    st.write(f"Receipt: [Download Receipt](/path/to/receipt/{bill['appointment_id']})")
+                elif st.button(f"Pay Bill for Appointment {bill['appointment_id']}", key=mod_key):
+                    pay_bill(bill['appointment_id'], bill['amount'])
 
 # Pay Bill
+# Function to handle bill payment and status update
 def pay_bill(appointment_id, amount):
-    st.write(f"Proceeding to pay ${amount} for appointment ID {appointment_id}.")
-    # Integrate billing API for secure transaction handling
-    st.success("Payment successful!")
-import pandas as pd
+    # Load the current billing data
+    billing_data = load_billing()
+
+    # Find the bill with the given appointment_id and update its status to "Paid"
+    billing_data.loc[billing_data['appointment_id'] == appointment_id, 'status'] = 'Paid'
+
+    # Save the updated billing data
+    save_billing(billing_data)
+
+    # Inform the user about the payment
+    st.write(f"💳 Bill for Appointment {appointment_id} has been marked as paid.")
+
+def update_bill_status(bill_id):
+    billing_data = load_billing()
+
+    # Find the bill and update the status
+    bill_idx = billing_data[billing_data["bill_id"] == bill_id].index
+    if not bill_idx.empty:
+        billing_data.loc[bill_idx, "status"] = "Paid"
+        save_billing(billing_data)
+        st.success("Bill status updated to Paid.")
 
 
 def save_users(users_df):
