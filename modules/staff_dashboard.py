@@ -117,6 +117,73 @@ def patient_details():
             st.rerun()
     else:
         st.info("No logs available for this patient.")
+import csv
+from datetime import datetime
+
+BILLING_FILE = "data/bills.csv"
+
+def calculate_bill(appointment_type, insurance_level):
+    base_prices = {
+        "check up": 200,
+        "emergency": 1000,
+        "surgery": 5000,
+        "follow up": 150
+    }
+
+    discounts = {
+        "premium": 0.50,
+        "standard": 0.30,
+        "basic": 0.10,
+        "none": 0.0
+    }
+
+    base_price = base_prices.get(appointment_type.lower(), 0)
+    discount = discounts.get(insurance_level.lower(), 0)
+    return round(base_price * (1 - discount), 2)
+
+def end_appointment(appointment):
+    st.subheader("🏁 End Appointment & Generate Bill")
+
+    patient_id = appointment["patient_id"]
+    patient_df = pd.read_csv(USERS_FILE)
+    patient = patient_df[patient_df["user_id"] == patient_id].iloc[0]
+
+    insurance_level = patient.get("insurance_level", "none") or "none"
+    final_bill = calculate_bill(appointment["type"], insurance_level)
+
+    st.markdown(f"**Appointment Type:** {appointment['type']}")
+    st.markdown(f"**Patient Insurance Level:** {insurance_level.capitalize()}")
+    st.markdown(f"💰 **Final Bill:** AED {final_bill}")
+
+    if st.button("✔️ Confirm & Save Bill"):
+        bill_entry = {
+            "bill_id": str(uuid.uuid4()),
+            "patient_id": patient_id,
+            "appointment_id": appointment["appointment_id"],
+            "appointment_type": appointment["type"],
+            "insurance_level": insurance_level,
+            "amount": final_bill,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+
+        # Save to CSV
+        file_exists = os.path.exists(BILLING_FILE)
+        with open(BILLING_FILE, mode='a', newline='') as file:
+            writer = csv.DictWriter(file, fieldnames=bill_entry.keys())
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(bill_entry)
+
+        st.success("✅ Bill saved successfully.")
+
+        # ✅ Remove appointment
+        appointments_df = load_appointments()
+        appointments_df = appointments_df[appointments_df["appointment_id"] != appointment["appointment_id"]]
+        appointments_df.to_csv(APPOINTMENTS_FILE, index=False)
+
+        st.session_state.staff_page = "Schedule"
+        st.rerun()
+
 
 def log_details():
     # Get patient_id and log_index from session_state
@@ -243,7 +310,13 @@ def appointment_schedule():
                 st.write(f"🧑 Patient ID: {appt['patient_id']}")
                 st.write(f"📄 Type: {appt['type']}")
                 st.markdown(f"[🔗 Join Meeting]({appt['meeting_link']})", unsafe_allow_html=True)
-                if st.button(f"🛠 Modify Appointment {appt['appointment_id']}"):
+                if st.button("🧾 End Appointment & Generate Bill", key=f"end_appt_{appt['appointment_id']}"):
+                    st.session_state.selected_appointment = appt.to_dict()  # Fix this to use the current appointment
+                    st.session_state.staff_page = "end_appointment"
+                    st.rerun()
+
+                if st.button(f"🛠 Modify Appointment {appt['appointment_id']}",
+                             key=f"mod_appt_{appt['appointment_id']}"):
                     st.session_state.modify_appt_id = appt['appointment_id']
                     st.rerun()
 
@@ -323,6 +396,8 @@ def staff_dashboard():
             log_details()
         case "add_log":
             add_log()
+        case "end_appointment":
+            end_appointment(st.session_state.selected_appointment)
         case _:
             render_staff_home()
 
