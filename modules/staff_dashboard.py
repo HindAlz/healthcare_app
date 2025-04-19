@@ -3,6 +3,10 @@ import pandas as pd
 import os
 import uuid
 
+# Set your OpenAI API key securely
+from openai import OpenAI
+client = OpenAI(api_key="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")
+LOGS_FILE = os.path.join("data", "logs.csv")
 USERS_FILE = os.path.join("data", "users.csv")
 APPOINTMENTS_FILE = os.path.join("data", "appointments.csv")
 
@@ -13,9 +17,21 @@ def load_appointments():
     except:
         return pd.DataFrame(columns=["appointment_id", "staff_id", "patient_id", "date", "time", "type", "meeting_link"])
 
-# Dummy AI diagnosis function
-def generate_diagnosis(details):
-    return "AI Suggests: Possible viral infection. Recommend a CBC test and hydration."
+def load_logs():
+    try:
+        return pd.read_csv(LOGS_FILE)
+    except FileNotFoundError:
+        return pd.DataFrame(columns=["patient_id", "date", "summary", "details"])
+def save_log_to_file(patient_id, date, summary, details):
+    df = load_logs()
+    new_entry = pd.DataFrame([{
+        "patient_id": patient_id,
+        "date": date,
+        "summary": summary,
+        "details": details
+    }])
+    df = pd.concat([df, new_entry], ignore_index=True)
+    df.to_csv(LOGS_FILE, index=False)
 
 # Patient Management Page
 def patient_management():
@@ -85,7 +101,9 @@ def patient_details():
         st.markdown(f"**Phone Number:** Not provided")
 
     # Placeholder logs
-    logs = st.session_state.get("logs", {}).get(patient_id, [])
+    all_logs = load_logs()
+    logs = all_logs[all_logs["patient_id"] == patient_id].to_dict("records")
+
     if logs:
         st.subheader("📄 Visit Logs")
         log_df = pd.DataFrame(logs)[["date", "summary"]]
@@ -101,31 +119,63 @@ def patient_details():
         st.info("No logs available for this patient.")
 
 def log_details():
+    # Get patient_id and log_index from session_state
+    patient_id = st.session_state.get("selected_patient_id")
+    log_index = st.session_state.get("selected_log_index")
+
     col1, col2 = st.columns([1, 10])
     with col1:
         if st.button("← Back"):
             st.session_state.staff_page = "patient_details"
             st.rerun()
 
-    patient_id = st.session_state.get("selected_patient_id")
-    log_index = st.session_state.get("selected_log_index")
-    logs = st.session_state.get("logs", {}).get(patient_id, [])
+    # Check for missing selections
+    if patient_id is None or log_index is None:
+        st.warning("Missing patient or log selection.")
+        return
 
-    if patient_id is None or log_index is None or log_index >= len(logs):
+    all_logs = load_logs()
+    logs = all_logs[all_logs["patient_id"] == patient_id].to_dict("records")
+
+    # Check if log_index is out of bounds
+    if log_index >= len(logs):
         st.warning("Log not found.")
         return
 
     log = logs[log_index]
-    df = pd.read_csv(USERS_FILE)
-    patient = df[df["user_id"] == patient_id].iloc[0]
+
+    try:
+        df = pd.read_csv(USERS_FILE)
+        patient = df[df["user_id"] == patient_id].iloc[0]
+    except Exception as e:
+        st.error(f"Error loading patient info: {e}")
+        return
 
     st.title(f"🗂️ Detailed Log for {patient['name']}")
     st.markdown(f"**Date:** {log['date']}")
     st.markdown(f"**Summary:** {log['summary']}")
     st.markdown(f"**Detailed Notes:**\n{log['details']}")
     st.divider()
+
     st.markdown("### 🧠 AI Diagnosis Suggestion")
-    st.success(log.get("ai_diagnosis", "N/A"))
+
+    if st.button("💬 Get Medical Suggestion via GPT"):
+        with st.spinner("Contacting AI..."):
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system",
+                     "content": "You are a helpful medical assistant to a doctor. Provide suggestions based on symptoms."},
+                    {"role": "user", "content": f"Patient log summary: {log['summary']}\nDetails: {log['details']}"}
+                ],
+                temperature=0.5,
+                max_tokens=200
+            )
+            suggestion = response.choices[0].message.content
+            st.session_state.generated_chat_suggestion = suggestion
+
+    if st.session_state.get("generated_chat_suggestion"):
+        st.info(st.session_state["generated_chat_suggestion"])
 
 def add_log():
     st.title("Add New Log")
@@ -149,11 +199,8 @@ def add_log():
                 "date": str(log_date),
                 "summary": summary,
                 "details": details,
-                "ai_diagnosis": generate_diagnosis(details)
             }
-            logs = st.session_state.get("logs", {})
-            logs.setdefault(patient_id, []).append(new_log)
-            st.session_state.logs = logs
+            save_log_to_file(patient_id, log_date, summary, details)
             st.success("Log saved successfully.")
             st.session_state.staff_page = "patient_details"
             st.rerun()
@@ -161,9 +208,19 @@ def add_log():
             st.warning("Please fill in all fields.")
 
 def appointment_schedule():
+    if st.button("← Back to Dashboard"):
+        st.session_state.staff_page = "Dashboard"
+        st.rerun()
     st.title("Appointment Schedule")
 
-    user = st.session_state.get("user", {"user_id": 1, "role": "Staff", "schedule": "9AM–5PM", "position": "General Physician"})
+
+
+    user = st.session_state.get("user", {
+        "user_id": 1,
+        "role": "Staff",
+        "schedule": "9AM–5PM",
+        "position": "General Physician"
+    })
 
     if user["role"] != "Staff":
         st.error("Access Denied")
@@ -186,6 +243,37 @@ def appointment_schedule():
                 st.write(f"🧑 Patient ID: {appt['patient_id']}")
                 st.write(f"📄 Type: {appt['type']}")
                 st.markdown(f"[🔗 Join Meeting]({appt['meeting_link']})", unsafe_allow_html=True)
+                if st.button(f"🛠 Modify Appointment {appt['appointment_id']}"):
+                    st.session_state.modify_appt_id = appt['appointment_id']
+                    st.rerun()
+
+                if st.session_state.get("modify_appt_id") == appt['appointment_id']:
+                    with st.form(f"modify_form_{appt['appointment_id']}"):
+                        new_date = st.date_input("Date", pd.to_datetime(appt['date']))
+                        new_time = st.time_input("Time", pd.to_datetime(appt['time']).time())
+                        new_type = st.selectbox(
+                            "Appointment Type",
+                            ["check up", "emergency", "surgery", "follow up"],
+                            index=["check up", "emergency", "surgery", "follow up"].index(appt['type']) if appt[
+                                                                                                               'type'] in [
+                                                                                                               "check up",
+                                                                                                               "emergency",
+                                                                                                               "surgery",
+                                                                                                               "follow up"] else 0
+                        )
+                        new_link = st.text_input("Meeting Link", appt['meeting_link'])
+                        submitted = st.form_submit_button("💾 Save Changes")
+
+                        if submitted:
+                            appointments.loc[
+                                appointments['appointment_id'] == appt['appointment_id'], ['date', 'time', 'type',
+                                                                                           'meeting_link']] = [
+                                str(new_date), str(new_time), new_type, new_link
+                            ]
+                            appointments.to_csv(APPOINTMENTS_FILE, index=False)
+                            st.success("Appointment updated!")
+                            del st.session_state.modify_appt_id
+                            st.rerun()
 
 
 def sidebar_navigation():
