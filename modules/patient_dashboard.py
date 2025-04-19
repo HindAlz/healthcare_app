@@ -38,7 +38,80 @@ def load_billing():
         return pd.read_csv(BILLING_FILE)
     except Exception:
         return pd.DataFrame(columns=["bill_id","patient_id", "appointment_id","appointment_type", "bill_status","insurance_level", "amount","date","status"])
+import streamlit as st
+import pandas as pd
+import numpy as np
+from sklearn.tree import DecisionTreeClassifier
 
+# Sample Data (Replace with real data for more accuracy)
+data = {
+    'Family History': ['Yes', 'No', 'Yes', 'No', 'Yes'],
+    'Physical Activity': ['Sedentary', 'Moderately Active', 'Sedentary', 'Very Active', 'Sedentary'],
+    'Diet': ['Unhealthy', 'Healthy', 'Unhealthy', 'Healthy', 'Unhealthy'],
+    'Weight Status': ['Obese', 'Normal', 'Overweight', 'Normal', 'Obese'],
+    'Age Group': ['50+', '30–50', '30–50', 'Under 30', '50+'],
+    'Thirst': ['Yes', 'No', 'Yes', 'No', 'Yes'],
+    'Urination': ['Yes', 'No', 'Yes', 'No', 'Yes'],
+    'Ethnicity': ['Hispanic', 'Caucasian', 'African-American', 'Asian', 'African-American'],
+    'Diabetes Risk': ['High', 'Low', 'High', 'Low', 'High']
+}
+
+# Convert to DataFrame
+df = pd.DataFrame(data)
+
+# Encode categorical values
+df_encoded = df.copy()
+df_encoded['Family History'] = df['Family History'].map({'Yes': 1, 'No': 0})
+df_encoded['Physical Activity'] = df['Physical Activity'].map({'Sedentary': 0, 'Moderately Active': 1, 'Very Active': 2})
+df_encoded['Diet'] = df['Diet'].map({'Healthy': 1, 'Unhealthy': 0})
+df_encoded['Weight Status'] = df['Weight Status'].map({'Underweight': 0, 'Normal': 1, 'Overweight': 2, 'Obese': 3})
+df_encoded['Age Group'] = df['Age Group'].map({'Under 30': 0, '30–50': 1, '50+': 2})
+df_encoded['Thirst'] = df['Thirst'].map({'Yes': 1, 'No': 0})
+df_encoded['Urination'] = df['Urination'].map({'Yes': 1, 'No': 0})
+df_encoded['Ethnicity'] = df['Ethnicity'].map({'Caucasian': 0, 'Hispanic': 1, 'African-American': 2, 'Asian': 3, 'Other': 4})
+df_encoded['Diabetes Risk'] = df['Diabetes Risk'].map({'High': 1, 'Low': 0})
+
+# Train model
+X = df_encoded.drop('Diabetes Risk', axis=1)
+y = df_encoded['Diabetes Risk']
+clf = DecisionTreeClassifier(random_state=42)
+clf.fit(X, y)
+# Streamlit app
+def diabetes_risk_checker():
+    st.title("🧪 Diabetes Risk Checker")
+    st.info("Please answer the following questions to check your risk level:")
+
+    family_history = st.radio("Do you have a family history of diabetes?", ("Yes", "No"))
+    activity = st.radio("How would you describe your physical activity level?",
+                        ("Sedentary", "Moderately Active", "Very Active"))
+    diet = st.radio("How would you describe your dietary habits?", ("Healthy", "Unhealthy"))
+    weight_status = st.radio("What is your weight status?", ("Underweight", "Normal", "Overweight", "Obese"))
+    age_group = st.selectbox("Select your age group", ["Under 30", "30–50", "50+"])
+    thirst = st.radio("Do you experience excessive thirst?", ("Yes", "No"))
+    urination = st.radio("Do you experience frequent urination?", ("Yes", "No"))
+    ethnicity = st.selectbox("Select your ethnicity", ["Caucasian", "Hispanic", "African-American", "Asian", "Other"])
+
+    if st.button("Check My Risk"):
+        # Encode inputs
+        input_data = np.array([[
+            1 if family_history == "Yes" else 0,
+            {"Sedentary": 0, "Moderately Active": 1, "Very Active": 2}[activity],
+            {"Healthy": 1, "Unhealthy": 0}[diet],
+            {"Underweight": 0, "Normal": 1, "Overweight": 2, "Obese": 3}[weight_status],
+            {"Under 30": 0, "30–50": 1, "50+": 2}[age_group],
+            1 if thirst == "Yes" else 0,
+            1 if urination == "Yes" else 0,
+            {"Caucasian": 0, "Hispanic": 1, "African-American": 2, "Asian": 3, "Other": 4}[ethnicity]
+        ]])
+
+        # Make prediction
+        prediction = clf.predict(input_data)[0]
+
+        # Display result
+        if prediction == 1:
+            st.error("⚠️ You may be at high risk of diabetes. Please consult a doctor.")
+        else:
+            st.success("✅ You are at low risk based on the provided information.")
 
 # Patient dashboard
 def patient_dashboard():
@@ -80,7 +153,10 @@ def patient_dashboard():
             if st.button("📝 Update Info"):
                 st.session_state.patient_view = "update"
                 st.rerun()
-
+        with col2:
+            if st.button("🧪 Diabetes Risk Checker"):
+                st.session_state.patient_view = "diabetes_check"
+                st.rerun()
 
 
     elif st.session_state.patient_view == "schedule":
@@ -108,6 +184,12 @@ def patient_dashboard():
             st.session_state.patient_view = "dashboard"
             st.rerun()
         view_medical_history(user)
+    elif st.session_state.patient_view == "diabetes_check":
+        if st.button("⬅️ Return to Dashboard"):
+            st.session_state.patient_view = "dashboard"
+            st.rerun()
+        diabetes_risk_checker()
+
 
 
     elif st.session_state.patient_view == "update":
