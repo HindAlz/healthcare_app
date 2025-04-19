@@ -1,9 +1,9 @@
 import streamlit as st
 from auth import login, sign_up
-from pages.patient_dashboard import patient_dashboard
-from pages.staff_dashboard import staff_dashboard
-from pages.admin_dashboard import admin_dashboard
-from pages.er_dashboard import er_dashboard
+from modules.patient_dashboard import patient_dashboard
+from modules.staff_dashboard import staff_dashboard
+from modules.admin_dashboard import admin_dashboard
+from modules.er_dashboard import er_dashboard
 
 # Initialize session state
 if "user" not in st.session_state:
