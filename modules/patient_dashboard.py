@@ -50,85 +50,171 @@ def patient_dashboard():
         st.error("Access Denied: You are not authorized to view this page.")
         return
 
-    # Display patient profile information
+    # Sidebar profile
     st.sidebar.subheader(f"Profile: {user['name']}")
     st.sidebar.text(f"Email: {user['email']}")
     st.sidebar.text(f"Birthday: {user['birthday']}")
 
-    # Display patient options
-    st.subheader("What would you like to do?")
-    choice = st.selectbox("Choose an option", ["Schedule an Appointment", "View Medical History", "Billing and Payment",
-                                               "Update Personal Information"])
+    if "patient_view" not in st.session_state:
+        st.session_state.patient_view = "dashboard"
 
-    if choice == "Schedule an Appointment":
+    if st.session_state.patient_view == "dashboard":
+        st.subheader("What would you like to do?")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("📅 Schedule Appointment"):
+                st.session_state.patient_view = "schedule"
+                st.rerun()
+
+            if st.button("📄 Billing & Payment"):
+                st.session_state.patient_view = "billing"
+                st.rerun()
+
+        with col2:
+            if st.button("🩺 Medical History"):
+                st.session_state.patient_view = "history"
+                st.rerun()
+
+            if st.button("📝 Update Info"):
+                st.session_state.patient_view = "update"
+                st.rerun()
+
+
+
+    elif st.session_state.patient_view == "schedule":
+        if st.button("⬅️ Return to Dashboard"):
+            st.session_state.patient_view = "dashboard"
+            st.rerun()
         schedule_appointment(user)
 
-    elif choice == "View Medical History":
-        view_medical_history(user)
+    elif st.session_state.patient_view.startswith("modify_"):
+        appointment_id = int(st.session_state.patient_view.replace("modify_", ""))
+        modify_appointment(appointment_id)
+        if st.button("⬅️ Return to Appointments"):
+            st.session_state.patient_view = "schedule"
+            st.rerun()
 
-    elif choice == "Billing and Payment":
+    elif st.session_state.patient_view == "billing":
+        if st.button("⬅️ Return to Dashboard"):
+            st.session_state.patient_view = "dashboard"
+            st.rerun()
         billing_information(user)
 
-    elif choice == "Update Personal Information":
+
+    elif st.session_state.patient_view == "history":
+        if st.button("⬅️ Return to Dashboard"):
+            st.session_state.patient_view = "dashboard"
+            st.rerun()
+        view_medical_history(user)
+
+
+    elif st.session_state.patient_view == "update":
+        if st.button("⬅️ Return to Dashboard"):
+            st.session_state.patient_view = "dashboard"
+            st.rerun()
         update_personal_info(user)
 
-    # Return button to go back to the main dashboard
-    if st.button("Log Out"):
-        st.session_state.user = None  # Clear user session
-        st.rerun()
 
 
 # Schedule an Appointment
 def schedule_appointment(user):
-    st.subheader("Schedule an Appointment")
+    st.title("Your Appointments")
 
-    # Load appointments and show available slots
     appointments = load_appointments()
-    patient_appointments = appointments[appointments['patient_id'] == user['user_id']]
+    users = load_users()
+
+    # Get patient's appointments
+    patient_appointments = appointments[appointments["patient_id"] == user["user_id"]]
 
     if patient_appointments.empty:
-        st.write("No upcoming appointments.")
+        st.info("You don't have any appointments yet.")
     else:
-        st.write("Your upcoming appointments:")
-        for index, appointment in patient_appointments.iterrows():
-            st.write(f"Appointment ID: {appointment['appointment_id']}")
-            st.write(f"Date: {appointment['date']}, Time: {appointment['time']}")
-            st.write(f"Doctor: {appointment['staff_id']}, Type: {appointment['type']}")
-            st.write(f"Join link: [Join Meeting]({appointment['meeting_link']})")
-            if st.button(f"Modify Appointment {appointment['appointment_id']}"):
-                modify_appointment(appointment['appointment_id'])
+        st.subheader("Upcoming Appointments")
+        for idx, appointment in patient_appointments.iterrows():
+            mod_key = f"mod_appt_{user['user_id']}_{appointment['appointment_id']}_{idx}"  # Add idx to make the key unique
+            with st.expander(f"Appointment {appointment['appointment_id']}"):
+                staff_member = users[users["user_id"] == appointment["staff_id"]]
+                staff_name = staff_member["name"].values[0] if not staff_member.empty else "Unknown"
 
-    # Appointment form to book new appointment
-    st.subheader("Book a New Appointment")
-    appointment_date = st.date_input("Date", datetime.date.today())
-    appointment_time = st.time_input("Time", datetime.time(9, 0))
-    appointment_type = st.selectbox("Appointment Type", ["Consultation", "Checkup", "Emergency", "Follow-up"])
-    users = load_users()
-    staff_members = users[users["role"] == "Staff"]
+                st.write(f"📅 Date: **{appointment['date']}**")
+                st.write(f"⏰ Time: **{appointment['time']}**")
+                st.write(f"🧑 Doctor: **{staff_name}**")
+                st.write(f"📄 Type: **{appointment['type']}**")
+                st.markdown(f"[🔗 Join Meeting]({appointment['meeting_link']})", unsafe_allow_html=True)
 
-    if staff_members.empty:
-        st.warning("No staff available to book appointments.")
-        return
+                if st.button(f"🛠 Modify Appointment {appointment['appointment_id']}", key=mod_key):
+                    st.session_state.modify_appt_id = appointment['appointment_id']
+                    st.rerun()
 
-    staff_options = staff_members["name"].tolist()
-    selected_staff_name = st.selectbox("Doctor", staff_options)
+                # Check if this is the appointment the user wants to modify
+                if st.session_state.get("modify_appt_id") == appointment['appointment_id']:
+                    with st.form(f"modify_form_{user['user_id']}_{appointment['appointment_id']}_{idx}"):  # Add idx to the form key
+                        new_date = st.date_input("Date", pd.to_datetime(appointment['date']))
+                        new_time = st.time_input("Time", pd.to_datetime(appointment['time']).time())
+                        new_type = st.selectbox(
+                            "Appointment Type",
+                            ["check up", "emergency", "surgery", "follow up"],
+                            index=["check up", "emergency", "surgery", "follow up"].index(appointment['type']) if
+                            appointment['type'] in ["check up", "emergency", "surgery", "follow up"] else 0
+                        )
+                        new_link = st.text_input("Meeting Link", appointment['meeting_link'])
+                        submitted = st.form_submit_button("💾 Save Changes")
 
-    # Find the staff_id corresponding to the selected name
-    staff_id = staff_members[staff_members["name"] == selected_staff_name]["user_id"].values[0]
+                        if submitted:
+                            appointments.loc[
+                                appointments['appointment_id'] == appointment['appointment_id'], ['date', 'time', 'type',
+                                                                                                  'meeting_link']] = [
+                                str(new_date), str(new_time), new_type, new_link
+                            ]
+                            appointments.to_csv(APPOINTMENTS_FILE, index=False)
+                            st.success("Appointment updated!")
+                            del st.session_state.modify_appt_id
+                            st.experimental_rerun()  # Reload the page to reflect changes
 
-    if st.button("Book Appointment"):
-        new_appointment = {
-            "appointment_id": len(appointments) + 1,
-            "date": appointment_date,
-            "time": appointment_time,
-            "patient_id": user['user_id'],
-            "staff_id": staff_id,
-            "type": appointment_type,
-            "meeting_link": f"https://meet.example.com/{staff_id}/{len(appointments) + 1}"
-        }
-        appointments = pd.concat([appointments, pd.DataFrame([new_appointment])], ignore_index=True)
-        appointments.to_csv(APPOINTMENTS_FILE, index=False)
-        st.success("Appointment booked successfully!")
+    st.markdown("---")
+
+    # Button to show the booking form
+    if 'show_booking_form' not in st.session_state:
+        st.session_state.show_booking_form = False
+
+    if st.button("➕ Book Appointment"):
+        st.session_state.show_booking_form = True
+
+    # Display the booking form conditionally
+    if st.session_state.show_booking_form:
+        with st.form("book_appointment_form"):
+            st.subheader("Book a New Appointment")
+
+            # Booking form
+            appointment_date = st.date_input("Date", datetime.date.today())
+            appointment_time = st.time_input("Time", datetime.time(9, 0))
+            appointment_type = st.selectbox("Type", ["Consultation", "Checkup", "Emergency", "Follow-up"])
+
+            staff_members = users[users["role"] == "Staff"]
+            if staff_members.empty:
+                st.warning("No staff available at the moment.")
+                return
+
+            selected_staff = st.selectbox("Doctor", staff_members["name"])
+            staff_id = staff_members[staff_members["name"] == selected_staff]["user_id"].values[0]
+
+            if st.form_submit_button("➕ Confirm Booking"):
+                new_appointment = {
+                    "appointment_id": len(appointments) + 1,
+                    "date": appointment_date,
+                    "time": appointment_time,
+                    "patient_id": user["user_id"],
+                    "staff_id": staff_id,
+                    "type": appointment_type,
+                    "meeting_link": f"https://meet.example.com/{staff_id}/{len(appointments) + 1}"
+                }
+                appointments = pd.concat([appointments, pd.DataFrame([new_appointment])], ignore_index=True)
+                appointments.to_csv(APPOINTMENTS_FILE, index=False)
+                st.success("Appointment booked successfully!")
+                st.session_state.show_booking_form = False  # Hide the form after submission
+                st.experimental_rerun()  # Reload the page to show the new appointment
 
 
 # View Medical History
