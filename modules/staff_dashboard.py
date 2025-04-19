@@ -58,7 +58,14 @@ def patient_management():
             st.rerun()
 
 # Patient Details Page
+# Patient Details Page
 def patient_details():
+    # Button to return to the patient list
+    col1, col2 = st.columns([1, 10])
+    with col1:
+        if st.button("← Back", key="back_from_patient"):
+            st.session_state.staff_page = "Dashboard"
+
     patient_id = st.session_state.get("selected_patient_id")
 
     # Load patient data
@@ -98,29 +105,67 @@ def patient_details():
         # Display log summaries in a table
         st.dataframe(log_df)
 
-        # Show log details only when "Show Log" is clicked
+        # Show log details only when "Show Full Log" is clicked
         selected_log_index = st.selectbox("Select a log to view its details", range(len(logs)), format_func=lambda idx: f"{logs[idx]['date']} - {logs[idx]['summary']}")
 
         if selected_log_index is not None:
-            selected_log = logs[selected_log_index]
+            if st.button("➡️ Show Full Log Details"):
+                # Update the session state with selected log index
+                st.session_state.selected_log_index = selected_log_index
+                # Change the page to show log details
+                st.session_state.staff_page = "log_details"
+                st.rerun()
 
-            st.markdown("---")
-            st.subheader("📋 Log Detail View")
-            st.markdown(f"**Date:** {selected_log['date']}")
-            st.markdown(f"**Summary:** {selected_log['summary']}")
-            st.markdown("**Detailed Notes:**\nThe patient reported symptoms persisting for three days. Vital signs were stable. No signs of respiratory distress.")
-            st.markdown("**Technical Info:**\nBlood Pressure: 120/80 mmHg, Temperature: 37.8°C, Oxygen Saturation: 97%")
-
-            st.divider()
-            st.markdown("### 🧠 AI Diagnosis Suggestion")
-            st.success("AI Suggests: Possible viral infection. Recommend a CBC test and hydration.")
     else:
         st.info("No logs available for this patient.")
 
-    # Button to return to the patient list
-    if st.button("↩️ Return to Patient List"):
-        st.session_state.page = "patient_management"
-        st.rerun()
+
+
+def log_details():
+    col1, col2 = st.columns([1, 10])
+    with col1:
+        if st.button("← Back", key="back_from_log"):
+            st.session_state.staff_page = "patient_details"
+    patient_id = st.session_state.get("selected_patient_id")
+    log_index = st.session_state.get("selected_log_index")
+
+    if patient_id is None or log_index is None:
+        st.warning("No log selected.")
+        return
+
+    # Patient data
+    df = pd.read_csv(USERS_FILE)
+    patient = df[df["user_id"] == patient_id].iloc[0]
+
+    # Get the log entry
+    patient_logs = {
+        1: [
+            {"date": "2025-04-01", "summary": "Cough and fever", "details": "The patient reported a 3-day history of cough and fever."},
+            {"date": "2025-04-10", "summary": "Follow-up visit, mild improvement", "details": "Symptoms have reduced, mild fever persists."}
+        ],
+        4: [
+            {"date": "2025-04-03", "summary": "High blood sugar", "details": "Blood sugar levels were elevated, monitored during visit."},
+            {"date": "2025-04-12", "summary": "Routine check-up", "details": "No major issues found during check-up."}
+        ]
+    }
+    logs = patient_logs.get(patient_id, [])
+    if log_index >= len(logs):
+        st.error("Log not found.")
+        return
+
+    log = logs[log_index]
+
+    st.title(f"🗂️ Detailed Log for {patient['name']}")
+    st.markdown(f"**Date:** {log['date']}")
+    st.markdown(f"**Summary:** {log['summary']}")
+    st.markdown(f"**Detailed Notes:**\n{log['details']}")
+    st.markdown("**Technical Info:**\nBlood Pressure: 120/80 mmHg, Temperature: 37.8°C, Oxygen Saturation: 97%")
+
+    st.divider()
+    st.markdown("### 🧠 AI Diagnosis Suggestion")
+    st.success("AI Suggests: Possible viral infection. Recommend a CBC test and hydration.")
+
+
 
 
 # Sidebar Navigation (optional if you want a sidebar)
@@ -204,11 +249,44 @@ def staff_dashboard():
         modify_appointment()
     elif st.session_state.staff_page == "patient_details":
         patient_details()
+    elif st.session_state.staff_page == "log_details":
+        log_details()
     else:
         render_staff_home()
 
 
 APPOINTMENTS_FILE = os.path.join("data", "appointments.csv")
+def appointment_schedule():
+    st.title("Appointment Schedule")
+
+    user = st.session_state.user
+
+    if user["role"] != "Staff":
+        st.error("Access Denied: You are not authorized to view this page.")
+        return
+
+    st.sidebar.subheader(f"Work Hours: {user['schedule']}")
+    st.sidebar.text(f"Position: {user['position']}")
+
+    appointments = load_appointments()
+    staff_appointments = appointments[appointments['staff_id'] == user['user_id']]
+
+    if staff_appointments.empty:
+        st.write("No upcoming appointments.")
+    else:
+        st.subheader("Upcoming Appointments")
+        for _, appt in staff_appointments.iterrows():
+            with st.expander(f"Appointment {appt['appointment_id']}"):
+                st.write(f"📅 Date: **{appt['date']}**")
+                st.write(f"⏰ Time: **{appt['time']}**")
+                st.write(f"🧑 Patient ID: {appt['patient_id']}")
+                st.write(f"📄 Type: {appt['type']}")
+                st.markdown(f"[🔗 Join Meeting]({appt['meeting_link']})", unsafe_allow_html=True)
+
+                if st.button(f"Modify Appointment {appt['appointment_id']}"):
+                    st.session_state.modify_id = appt['appointment_id']
+                    st.session_state.staff_page = "Modify"
+                    st.rerun()
 
 # Load appointments
 def load_appointments():
