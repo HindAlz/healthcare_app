@@ -1,7 +1,8 @@
 import streamlit as st
 import pandas as pd
-import datetime
-
+import numpy as np
+from sklearn.tree import DecisionTreeClassifier
+from models import Patient, MedicalStaff, ManagementStaff, Appointment, Bill, Resource
 # File paths
 APPOINTMENTS_FILE = "data/appointments.csv"
 MEDICAL_HISTORY_FILE = "data/medical_history.csv"
@@ -9,40 +10,120 @@ BILLING_FILE = "data/bills.csv"
 
 USERS_FILE = "data/users.csv"
 
-def load_users():
-    try:
-        return pd.read_csv(USERS_FILE)
-    except Exception:
-        return pd.DataFrame(columns=["user_id", "username", "password", "role", "name", "birthday", "email", "position", "specialization", "schedule"])
+def load_user_objects():
+    df = pd.read_csv("data/users.csv")
+    user_objects = {}
 
-# Load appointments
-def load_appointments():
-    try:
-        return pd.read_csv(APPOINTMENTS_FILE)
-    except Exception:
-        return pd.DataFrame(
-            columns=["appointment_id", "date", "time", "patient_id", "staff_id", "type", "meeting_link"])
+    for _, row in df.iterrows():
+        user_id = row["user_id"]
+        name = row["name"]
+        personal_info = {
+            "email": row.get("email"),
+            "birthday": row.get("birthday"),
+            "username": row.get("username"),
+            "specialization": row.get("specialization", ""),
+        }
+
+        if row["role"] == "Patient":
+            user_objects[user_id] = Patient(user_id, name, personal_info)
+        elif row["role"] == "Staff":
+            user_objects[user_id] = MedicalStaff(
+                user_id,
+                name,
+                personal_info,
+                schedule=row.get("schedule", ""),
+                position=row.get("position", "")
+            )
+
+    return user_objects
+
+def load_appointment_objects():
+    df = pd.read_csv("data/appointments.csv")
+    appointments = []
+
+    for _, row in df.iterrows():
+        appt = Appointment(
+            appointmentID=row["appointment_id"],
+            date=f"{row['date']} {row['time']}",
+            patientID=row["patient_id"],
+            staffID=row["staff_id"],
+            info=row["meeting_link"],
+            type=row["type"]
+        )
+        appointments.append(appt)
+
+    return appointments
+def load_medical_histories(user_map):
+    df = pd.read_csv("data/medical_history.csv")
+    for _, row in df.iterrows():
+        patient = user_map.get(row["patient_id"])
+        if isinstance(patient, Patient):
+            day, month, year = map(int, row["date"].split("-"))
+            patient.addHistory(day, month, year, row["summary"])
 
 
-# Load medical history
-def load_medical_history():
-    try:
-        return pd.read_csv(MEDICAL_HISTORY_FILE)
-    except Exception:
-        return pd.DataFrame(columns=["patient_id", "appointment_id", "date", "summary", "test_results"])
+# 1) Load bills into OOP objects
+def load_bill_objects():
+    df = pd.read_csv(BILLING_FILE)
+    bills = []
+    for _, row in df.iterrows():
+        bill = Bill(
+            billID = row["bill_id"],
+            patientID = row["patient_id"],
+            appointmentID = row["appointment_id"],
+            amount = row["amount"],
+            paid = (str(row.get("status","")).lower() == "paid")
+        )
+        bills.append(bill)
+    return bills
 
+# 2) Persist a list of Bill objects back to CSV by updating only the status column
+# Persist all Bill objects back to the CSV
+def save_bills_to_csv(bills):
+    data = [{
+        "bill_id": bill.billID,
+        "patient_id": bill.patientID,
+        "appointment_id": bill.appointmentID,
+        "amount": bill.amount,
+        "status": "Paid" if bill.paid else "Unpaid"
+    } for bill in bills]
 
-# Load billing information
-def load_billing():
-    try:
-        return pd.read_csv(BILLING_FILE)
-    except Exception:
-        return pd.DataFrame(columns=["bill_id","patient_id", "appointment_id","appointment_type", "bill_status","insurance_level", "amount","date","status"])
-import streamlit as st
-import pandas as pd
-import numpy as np
-from sklearn.tree import DecisionTreeClassifier
+    df = pd.DataFrame(data)
+    df.to_csv(BILLING_FILE, index=False)
 
+# 3) The Streamlit view
+def billing_information(user):
+    # Ensure we have a Patient object
+    user_map = load_user_objects()
+    if isinstance(user, dict):
+        user = user_map.get(user.get("user_id"))
+        if not isinstance(user, Patient):
+            st.error("Could not load your patient record.")
+            return
+
+    st.subheader("📄 Billing Information")
+
+    bills = load_bill_objects()
+    patient_bills = [b for b in bills if b.patientID == user.patientID]
+
+    if not patient_bills:
+        st.info("No billing information available.")
+        return
+
+    for bill in patient_bills:
+        key = f"bill_{bill.billID}"
+        with st.expander(f"Bill ID {bill.billID} (Appt {bill.appointmentID})"):
+            st.write(f"💰 Amount: **${bill.amount:.2f}**")
+            st.write(f"🛑 Status: **{'Paid' if bill.paid else 'Unpaid'}**")
+
+            if bill.paid:
+                st.write(f"✅ Already paid. [Download receipt](/receipts/{bill.billID}.pdf)")
+            else:
+                if st.button("Pay Now", key=key):
+                    bill.pay()
+                    save_bills_to_csv(bills)
+                    st.success(f"Bill {bill.billID} marked as Paid.")
+                    st.rerun()
 # Sample Data (Replace with real data for more accuracy)
 data = {
     'Family History': ['Yes', 'No', 'Yes', 'No', 'Yes'],
@@ -112,25 +193,24 @@ def diabetes_risk_checker():
             st.error("⚠️ You may be at high risk of diabetes. Please consult a doctor.")
         else:
             st.success("✅ You are at low risk based on the provided information.")
-
-# Patient dashboard
 def patient_dashboard():
     st.title("Patient Dashboard")
 
-    # Load user and check if role is patient
+    # Ensure the user is a Patient
     user = st.session_state.user
-    if user["role"] != "Patient":
+    if not isinstance(user, Patient):
         st.error("Access Denied: You are not authorized to view this page.")
         return
 
-    # Sidebar profile
-    st.sidebar.subheader(f"Profile: {user['name']}")
-    st.sidebar.text(f"Email: {user['email']}")
-    st.sidebar.text(f"Birthday: {user['birthday']}")
+    # Sidebar profile using user attributes (directly from Patient object)
+    st.sidebar.subheader(f"Profile: {user.name}")
+    st.sidebar.text(f"Email: {user.personalInfo['email']}")
+    st.sidebar.text(f"Birthday: {user.personalInfo['birthday']}")
 
     if "patient_view" not in st.session_state:
         st.session_state.patient_view = "dashboard"
 
+    # Handle different views for the patient dashboard
     if st.session_state.patient_view == "dashboard":
         st.subheader("What would you like to do?")
 
@@ -153,11 +233,11 @@ def patient_dashboard():
             if st.button("📝 Update Info"):
                 st.session_state.patient_view = "update"
                 st.rerun()
+
         with col2:
             if st.button("🧪 Diabetes Risk Checker"):
                 st.session_state.patient_view = "diabetes_check"
                 st.rerun()
-
 
     elif st.session_state.patient_view == "schedule":
         if st.button("⬅️ Return to Dashboard"):
@@ -178,19 +258,17 @@ def patient_dashboard():
             st.rerun()
         billing_information(user)
 
-
     elif st.session_state.patient_view == "history":
         if st.button("⬅️ Return to Dashboard"):
             st.session_state.patient_view = "dashboard"
             st.rerun()
         view_medical_history(user)
+
     elif st.session_state.patient_view == "diabetes_check":
         if st.button("⬅️ Return to Dashboard"):
             st.session_state.patient_view = "dashboard"
             st.rerun()
         diabetes_risk_checker()
-
-
 
     elif st.session_state.patient_view == "update":
         if st.button("⬅️ Return to Dashboard"):
@@ -198,239 +276,262 @@ def patient_dashboard():
             st.rerun()
         update_personal_info(user)
 
+def save_appointments_to_csv(appointments: list):
+    data = [{
+        "appointment_id": a.appointmentID,
+        "date": a.date.split(" ")[0],
+        "time": a.date.split(" ")[1],
+        "patient_id": a.patientID,
+        "staff_id": a.staffID,
+        "type": a.type,
+        "meeting_link": a.info
+    } for a in appointments]
 
+    pd.DataFrame(data).to_csv("data/appointments.csv", index=False)
+import datetime
+import pandas as pd
+import streamlit as st
+from collections import defaultdict
 
-# Schedule an Appointment
-def schedule_appointment(user):
+# assumes these are already imported / defined:
+
+import streamlit as st
+import pandas as pd
+from datetime import date, time
+from datetime import date, time
+
+def schedule_appointment(user: Patient):
     st.title("Your Appointments")
 
-    appointments = load_appointments()
-    users = load_users()
+    user_map = load_user_objects()
+    appointments = load_appointment_objects()
 
-    # Get patient's appointments
-    patient_appointments = appointments[appointments["patient_id"] == user["user_id"]]
+    # Filter this patient's appointments
+    patient_appointments = [a for a in appointments if a.patientID == user.patientID]
 
-    if patient_appointments.empty:
+    if not patient_appointments:
         st.info("You don't have any appointments yet.")
     else:
         st.subheader("Upcoming Appointments")
-        for idx, appointment in patient_appointments.iterrows():
-            mod_key = f"mod_appt_{user['user_id']}_{appointment['appointment_id']}_{idx}"  # Add idx to make the key unique
-            with st.expander(f"Appointment {appointment['appointment_id']}"):
-                staff_member = users[users["user_id"] == appointment["staff_id"]]
-                staff_name = staff_member["name"].values[0] if not staff_member.empty else "Unknown"
+        for idx, appointment in enumerate(patient_appointments):
+            staff = user_map.get(appointment.staffID)
+            staff_name = staff.name if isinstance(staff, MedicalStaff) else "Unknown"
 
-                st.write(f"📅 Date: **{appointment['date']}**")
-                st.write(f"⏰ Time: **{appointment['time']}**")
+            date_str, time_str = appointment.date.split(" ")
+
+            with st.expander(f"Appointment {appointment.appointmentID}"):
+                st.write(f"📅 Date: **{date_str}**")
+                st.write(f"⏰ Time: **{time_str}**")
                 st.write(f"🧑 Doctor: **{staff_name}**")
-                st.write(f"📄 Type: **{appointment['type']}**")
-                st.markdown(f"[🔗 Join Meeting]({appointment['meeting_link']})", unsafe_allow_html=True)
+                st.write(f"📄 Type: **{appointment.type}**")
+                st.markdown(f"[🔗 Join Meeting]({appointment.info})", unsafe_allow_html=True)
 
-                if st.button(f"🛠 Modify Appointment {appointment['appointment_id']}", key=mod_key):
-                    st.session_state.modify_appt_id = appointment['appointment_id']
+                if st.button("🛠 Modify Appointment", key=f"mod_{appointment.appointmentID}"):
+                    st.session_state.patient_view = f"modify_{appointment.appointmentID}"
                     st.rerun()
-
-                # Check if this is the appointment the user wants to modify
-                if st.session_state.get("modify_appt_id") == appointment['appointment_id']:
-                    with st.form(f"modify_form_{user['user_id']}_{appointment['appointment_id']}_{idx}"):  # Add idx to the form key
-                        new_date = st.date_input("Date", pd.to_datetime(appointment['date']))
-                        new_time = st.time_input("Time", pd.to_datetime(appointment['time']).time())
-                        new_type = st.selectbox(
-                            "Appointment Type",
-                            ["check up", "emergency", "surgery", "follow up"],
-                            index=["check up", "emergency", "surgery", "follow up"].index(appointment['type']) if
-                            appointment['type'] in ["check up", "emergency", "surgery", "follow up"] else 0
-                        )
-                        new_link = st.text_input("Meeting Link", appointment['meeting_link'])
-                        submitted = st.form_submit_button("💾 Save Changes")
-
-                        if submitted:
-                            appointments.loc[
-                                appointments['appointment_id'] == appointment['appointment_id'], ['date', 'time', 'type',
-                                                                                                  'meeting_link']] = [
-                                str(new_date), str(new_time), new_type, new_link
-                            ]
-                            appointments.to_csv(APPOINTMENTS_FILE, index=False)
-                            st.success("Appointment updated!")
-                            del st.session_state.modify_appt_id
-                            st.rerun()  # Reload the page to reflect changes
 
     st.markdown("---")
 
-    # Button to show the booking form
-    if 'show_booking_form' not in st.session_state:
+    # === Book New Appointment ===
+    if "show_booking_form" not in st.session_state:
         st.session_state.show_booking_form = False
 
     if st.button("➕ Book Appointment"):
         st.session_state.show_booking_form = True
 
-    # Display the booking form conditionally
     if st.session_state.show_booking_form:
         with st.form("book_appointment_form"):
             st.subheader("Book a New Appointment")
 
-            # Booking form
-            appointment_date = st.date_input("Date", datetime.date.today())
-            appointment_time = st.time_input("Time", datetime.time(9, 0))
-            appointment_type = st.selectbox("Type", ["Consultation", "Checkup", "Emergency", "Follow-up"])
+            appt_date = st.date_input("Date", date.today())
+            appt_time = st.time_input("Time", time(9, 0))
+            appt_type = st.selectbox("Type", ["Consultation", "Checkup", "Emergency", "Follow-up"])
 
-            staff_members = users[users["role"] == "Staff"]
-            if staff_members.empty:
-                st.warning("No staff available at the moment.")
+            staff_members = [u for u in user_map.values() if isinstance(u, MedicalStaff)]
+            if not staff_members:
+                st.warning("No staff available.")
                 return
 
-            selected_staff = st.selectbox("Doctor", staff_members["name"])
-            staff_id = staff_members[staff_members["name"] == selected_staff]["user_id"].values[0]
+            selected_name = st.selectbox("Doctor", [s.name for s in staff_members])
+            selected_staff = next(s for s in staff_members if s.name == selected_name)
 
-            if st.form_submit_button("➕ Confirm Booking"):
-                new_appointment = {
-                    "appointment_id": len(appointments) + 1,
-                    "date": appointment_date,
-                    "time": appointment_time,
-                    "patient_id": user["user_id"],
-                    "staff_id": staff_id,
-                    "type": appointment_type,
-                    "meeting_link": f"https://meet.example.com/{staff_id}/{len(appointments) + 1}"
-                }
-                appointments = pd.concat([appointments, pd.DataFrame([new_appointment])], ignore_index=True)
-                appointments.to_csv(APPOINTMENTS_FILE, index=False)
+            submitted = st.form_submit_button("➕ Confirm Booking")
+            if submitted:
+                new_id = max((a.appointmentID for a in appointments), default=0) + 1
+                new_appt = Appointment(
+                    appointmentID=new_id,
+                    date=f"{appt_date} {appt_time}",
+                    patientID=user.patientID,
+                    staffID=selected_staff.staffID,
+                    info=f"https://meet.example.com/{selected_staff.staffID}/{new_id}",
+                    type=appt_type
+                )
+                appointments.append(new_appt)
+                save_appointments_to_csv(appointments)
                 st.success("Appointment booked successfully!")
-                st.session_state.show_booking_form = False  # Hide the form after submission
-                st.rerun()  # Reload the page to show the new appointment
-
+                st.session_state.show_booking_form = False
+                st.rerun()
 
 # View Medical History
 import pandas as pd
+import pandas as pd
+import streamlit as st
 
-def view_medical_history(user):
-    st.subheader("Your Medical History")
+def view_medical_history(patient: Patient):
+    st.subheader("📋 Your Medical History")
 
-    # Load medical history from the CSV file
-    medical_history = pd.read_csv('data/logs.csv')
+    # Lazy-load from CSV if not already populated
+    if not patient.medicalHistory:
+        df = pd.read_csv("data/logs.csv")
+        # Filter rows for this patient
+        for _, row in df[df["patient_id"] == patient.patientID].iterrows():
+            # Assuming row["date"] is in "DD-MM-YYYY" or "YYYY-MM-DD" format
+            parts = row["date"].split("-")
+            # Try to parse day, month, year sensibly
+            try:
+                # If format is "YYYY-MM-DD"
+                year, month, day = map(int, parts)
+            except ValueError:
+                # Fallback for "DD-MM-YYYY"
+                day, month, year = map(int, parts)
+            patient.addHistory(day, month, year, row["summary"])
 
-    # Filter the medical history for the specific user based on their patient_id
-    patient_history = medical_history[medical_history['patient_id'] == user['user_id']]
-
-    if patient_history.empty:
-        st.write("No medical history available.")
+    # Display
+    if not patient.medicalHistory:
+        st.info("No medical history available.")
     else:
-        st.write("Your Medical History:")
-        # Only display the 'summary' column for the user
-        st.write(patient_history[["summary"]])
+        for entry in patient.medicalHistory:
+            st.markdown(f"🗓️ **{entry['date']}** — {entry['details']}")
 
 import os
 
 # Function to save updated billing data
 def save_billing(billing_data):
     billing_data.to_csv(BILLING_FILE, index=False)  # Save the updated DataFrame to the correct path
-
-def billing_information(user):
-    st.subheader("Billing Information")
-
-    billing_data = load_billing()
-
-    # Filter the bills related to the logged-in user
-    patient_bills = billing_data[billing_data['patient_id'] == user['user_id']]
-
-    if patient_bills.empty:
-        st.write("No billing information available.")
-    else:
-        for idx, bill in patient_bills.iterrows():
-            mod_key = f"mod_bill_{user['user_id']}_{bill['appointment_id']}_{idx}"  # Add idx to make the key unique
-            with st.expander(f"Bill for Appointment {bill['appointment_id']}"):
-                st.write(f"📅 Appointment ID: **{bill['appointment_id']}**")
-                st.write(f"🧑 Appointment Type: **{bill['appointment_type']}**")
-                st.write(f"💰 Amount: **${bill['amount']}**")
-                st.write(f"📅 Date: **{bill['date']}**")
-
-                # Check if 'status' exists in the DataFrame
-                if 'status' in bill:
-                    st.write(f"🛑 Status: **{bill['status']}**")
-                else:
-                    st.write("🛑 Status: **Unknown**")
-
-                if bill["status"] == "Paid":
-                    st.write(f"Receipt: [Download Receipt](/path/to/receipt/{bill['appointment_id']})")
-                elif st.button(f"Pay Bill for Appointment {bill['appointment_id']}", key=mod_key):
-                    pay_bill(bill['appointment_id'], bill['amount'])
-
-# Pay Bill
 # Function to handle bill payment and status update
 def pay_bill(appointment_id, amount):
-    # Load the current billing data
-    billing_data = load_billing()
+    # Load all bills as Bill objects
+    bills = load_bill_objects()
 
-    # Find the bill with the given appointment_id and update its status to "Paid"
-    billing_data.loc[billing_data['appointment_id'] == appointment_id, 'status'] = 'Paid'
+    # Find the bill for the given appointment ID
+    bill = next((b for b in bills if b.appointmentID == appointment_id), None)
+    if bill:
+        # Mark as paid and update status
+        bill.pay()
 
-    # Save the updated billing data
-    save_billing(billing_data)
+        # Save updated bills back to CSV
+        save_bills_to_csv(bills)
 
-    # Inform the user about the payment
-    st.write(f"💳 Bill for Appointment {appointment_id} has been marked as paid.")
+        # Inform the user
+        st.write(f"💳 Bill for Appointment {appointment_id} has been marked as paid.")
+    else:
+        st.error(f"No bill found for Appointment ID {appointment_id}.")
 
+# Function to update the bill status to 'Paid' (same as paying the bill)
 def update_bill_status(bill_id):
-    billing_data = load_billing()
+    # Load all bills as Bill objects
+    bills = load_bill_objects()
 
-    # Find the bill and update the status
-    bill_idx = billing_data[billing_data["bill_id"] == bill_id].index
-    if not bill_idx.empty:
-        billing_data.loc[bill_idx, "status"] = "Paid"
-        save_billing(billing_data)
-        st.success("Bill status updated to Paid.")
+    # Find the bill with the given bill_id
+    bill = next((b for b in bills if b.billID == bill_id), None)
+    if bill:
+        # Mark as paid and update status
+        bill.pay()
 
+        # Save updated bills back to CSV
+        save_bills_to_csv(bills)
+
+        # Inform the user
+        st.success(f"Bill {bill_id} has been updated to Paid.")
+    else:
+        st.error(f"No bill found with Bill ID {bill_id}.")
 
 def save_users(users_df):
     users_df.to_csv(USERS_FILE, index=False)
+import streamlit as st
+from datetime import datetime
 
-def update_personal_info(user):
+def update_personal_info(user: Patient):
     st.subheader("Update Personal Information")
 
-    # Create input fields for updating personal info
-    name = st.text_input("Name", user.get("name", ""))
-    email = st.text_input("Email", user.get("email", ""))
-    birthday = st.date_input("Birthday", datetime.datetime.strptime(user.get("birthday", "2000-01-01"), "%Y-%m-%d"))
+    # Show current values from the Patient object
+    name = st.text_input("Name", user.name)
+    email = st.text_input("Email", user.personalInfo.get("email", ""))
+    birthday = st.date_input(
+        "Birthday",
+        datetime.strptime(user.personalInfo.get("birthday", "2000-01-01"), "%Y-%m-%d")
+    )
 
     if st.button("Save Changes"):
-        # Update the session state
-        st.session_state.user["name"] = name
-        st.session_state.user["email"] = email
-        st.session_state.user["birthday"] = str(birthday)
+        # 1) Update the object in memory
+        user.name = name
+        user.personalInfo["email"] = email
+        user.personalInfo["birthday"] = birthday.strftime("%Y-%m-%d")
 
-        # Load users from the CSV
-        users = load_users()
+        # 2) Persist updates to CSV
+        df = pd.read_csv(USERS_FILE)
+        # Find the row for this patient
+        idx = df.index[df["user_id"] == user.patientID]
+        if len(idx) == 0:
+            st.error("User record not found in CSV.")
+            return
 
-        # Find the user by their user_id
-        user_idx = users[users["user_id"] == user["user_id"]].index
+        i = idx[0]
+        df.at[i, "name"]     = name
+        df.at[i, "email"]    = email
+        df.at[i, "birthday"] = user.personalInfo["birthday"]
+        df.to_csv(USERS_FILE, index=False)
 
-        if not user_idx.empty:
-            # Update the user's information
-            users.loc[user_idx, "name"] = name
-            users.loc[user_idx, "email"] = email
-            users.loc[user_idx, "birthday"] = str(birthday)
+        # 3) Refresh session state so dashboards see the updated object
+        st.session_state.user = user
 
-            # Save the updated user data back to the CSV
-            save_users(users)
-
-            st.success("Your information has been updated.")
-        else:
-            st.error("User not found in the system.")
-
+        st.success("Your information has been updated!")
 # Modify Appointment
-def modify_appointment(appointment_id):
-    appointments = load_appointments()
-    appointment = appointments[appointments["appointment_id"] == appointment_id].iloc[0]
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+def modify_appointment(appointment_id: int):
+    appointments = load_appointment_objects()
+
+    # Find the appointment by ID
+    appointment = next((a for a in appointments if a.appointmentID == appointment_id), None)
+    if appointment is None:
+        st.error(f"No appointment found with ID {appointment_id}")
+        return
 
     st.subheader(f"Modify Appointment {appointment_id}")
-    date = st.date_input("Date", pd.to_datetime(appointment["date"]))
-    time = st.time_input("Time", pd.to_datetime(appointment["time"]).time())
-    appointment_type = st.selectbox("Type", ["Consultation", "Checkup", "Emergency", "Follow-up"],
-                                    index=["Consultation", "Checkup", "Emergency", "Follow-up"].index(
-                                        appointment["type"]))
-    meeting_link = st.text_input("Meeting Link", appointment["meeting_link"])
 
-    if st.button("Save Changes"):
-        appointments.loc[appointments["appointment_id"] == appointment_id, ["date", "time", "type", "meeting_link"]] = [
-            date, time, appointment_type, meeting_link]
-        appointments.to_csv(APPOINTMENTS_FILE, index=False)
-        st.success("Appointment modified successfully!")
+    # Split date/time string (assumes "YYYY-MM-DD HH:MM:SS")
+    try:
+        date_str, time_str = appointment.date.split(" ")
+        current_date = pd.to_datetime(date_str).date()
+        current_time = pd.to_datetime(time_str).time()
+    except Exception:
+        st.error("Error parsing date/time for this appointment.")
+        return
+
+    with st.form(key=f"modify_form_{appointment_id}"):
+        new_date = st.date_input("Date", current_date)
+        new_time = st.time_input("Time", current_time)
+
+        # Use consistent casing in options
+        type_options = ["Consultation", "Checkup", "Emergency", "Follow-up"]
+        try:
+            default_index = type_options.index(appointment.type)
+        except ValueError:
+            default_index = 0  # fallback if the type isn't in the list
+
+        new_type = st.selectbox("Type", type_options, index=default_index)
+        new_link = st.text_input("Meeting Link", appointment.info)
+
+        submitted = st.form_submit_button("💾 Save Changes")
+        if submitted:
+            appointment.date = f"{new_date} {new_time}"
+            appointment.type = new_type
+            appointment.info = new_link
+
+            save_appointments_to_csv(appointments)
+
+            st.success("Appointment updated successfully!")
+            st.session_state.modify_appt_id = None
+            st.rerun()

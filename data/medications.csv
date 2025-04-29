@@ -1,7 +1,7 @@
-med_id,name,stock,expiry_date,low_stock
-med001,Paracetamol,10,2025-12-31,10
-med002,Ibuprofen,10,2025-11-30,10
-med003,Aspirin,10,2025-06-15,10
-M004,coke,5,2025-04-20,5
-MED005,nom,1,2025-04-20,1
-MED006,pepsi,100,2026-04-16,50
+med_id,name,stock,expiry,low_stock
+MED001,Paracetamol,30,2025-12-01,30
+MED002,Aspirin,50,2025-06-15,20
+MED003,Ibuprofen,200,2026-01-20,50
+MED004,Amoxicillin,75,2025-11-05,25
+MED005,Ciprofloxacin,30,2025-05-10,15
+,f,3,2025-04-29,4

@@ -2,26 +2,113 @@ import streamlit as st
 import pandas as pd
 import os
 import uuid
-
-# Set your OpenAI API key securely
+from datetime import datetime, date, time
 from openai import OpenAI
-client = OpenAI(api_key="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")
-LOGS_FILE = os.path.join("data", "logs.csv")
-USERS_FILE = os.path.join("data", "users.csv")
-APPOINTMENTS_FILE = os.path.join("data", "appointments.csv")
+from models import Patient, MedicalStaff, Appointment, Bill
+APPOINTMENTS_FILE = "data/appointments.csv"
+MEDICAL_HISTORY_FILE = "data/medical_history.csv"
+BILLING_FILE = "data/bills.csv"
 
-# Dummy appointments loader
-def load_appointments():
-    try:
-        return pd.read_csv(APPOINTMENTS_FILE)
-    except:
-        return pd.DataFrame(columns=["appointment_id", "staff_id", "patient_id", "date", "time", "type", "meeting_link"])
+USERS_FILE = "data/users.csv"
+import pandas as pd
+from typing import Union, List
+from models import Bill
+
+
+def save_bills_to_csv(bills: Union[Bill, List[Bill]]):
+    # Allow a single Bill or a list
+    if isinstance(bills, Bill):
+        bills = [bills]
+
+    data = [{
+        "bill_id": bill.billID,
+        "patient_id": bill.patientID,
+        "appointment_id": bill.appointmentID,
+        "amount": bill.amount,
+        "status": "Paid" if bill.paid else "Unpaid"
+    } for bill in bills]
+
+    df = pd.DataFrame(data)
+    df.to_csv(BILLING_FILE, index=False)
+
+
+def save_appointments_to_csv(appointments: list):
+    data = [{
+        "appointment_id": a.appointmentID,
+        "date": a.date.split(" ")[0],
+        "time": a.date.split(" ")[1],
+        "patient_id": a.patientID,
+        "staff_id": a.staffID,
+        "type": a.type,
+        "meeting_link": a.info
+    } for a in appointments]
+
+    pd.DataFrame(data).to_csv("data/appointments.csv", index=False)
+
+def load_user_objects():
+    df = pd.read_csv("data/users.csv")
+    user_objects = {}
+
+    for _, row in df.iterrows():
+        user_id = row["user_id"]
+        name = row["name"]
+        personal_info = {
+            "email": row.get("email"),
+            "birthday": row.get("birthday"),
+            "username": row.get("username"),
+            "specialization": row.get("specialization", ""),
+        }
+
+        if row["role"] == "Patient":
+            user_objects[user_id] = Patient(user_id, name, personal_info)
+        elif row["role"] == "Staff":
+            user_objects[user_id] = MedicalStaff(
+                user_id,
+                name,
+                personal_info,
+                schedule=row.get("schedule", ""),
+                position=row.get("position", "")
+            )
+
+    return user_objects
+
+def load_appointment_objects():
+    df = pd.read_csv("data/appointments.csv")
+    appointments = []
+
+    for _, row in df.iterrows():
+        appt = Appointment(
+            appointmentID=row["appointment_id"],
+            date=f"{row['date']} {row['time']}",
+            patientID=row["patient_id"],
+            staffID=row["staff_id"],
+            info=row["meeting_link"],
+            type=row["type"]
+        )
+        appointments.append(appt)
+
+    return appointments
+
+# --- AI Setup ---
+client = OpenAI(api_key="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")  # Store securely in env in prod
+APPOINTMENTS_FILE = "data/appointments.csv"
+USERS_FILE = "data/users.csv"
+LOGS_FILE = "data/logs.csv"
+
+# --- Log ---
+import pandas as pd
+
+LOGS_FILE = "data/logs.csv"
 
 def load_logs():
     try:
-        return pd.read_csv(LOGS_FILE)
+        df = pd.read_csv(LOGS_FILE)
+        df["patient_id"] = df["patient_id"].astype(int)
+        df["date"] = pd.to_datetime(df["date"])
+        return df
     except FileNotFoundError:
         return pd.DataFrame(columns=["patient_id", "date", "summary", "details"])
+
 def save_log_to_file(patient_id, date, summary, details):
     df = load_logs()
     new_entry = pd.DataFrame([{
@@ -33,101 +120,200 @@ def save_log_to_file(patient_id, date, summary, details):
     df = pd.concat([df, new_entry], ignore_index=True)
     df.to_csv(LOGS_FILE, index=False)
 
-# Patient Management Page
+
+def staff_dashboard():
+    if "staff_page" not in st.session_state:
+        st.session_state.staff_page = "Dashboard"
+    match st.session_state.staff_page:
+        case "Dashboard": render_staff_home()
+        case "Patients": patient_management()
+        case "Schedule": appointment_schedule()
+        case "patient_details": patient_details()
+        case "add_log": add_log()
+        case "log_details": log_details()
+        case "end_appointment": end_appointment(st.session_state.selected_appointment)
+
+def render_staff_home():
+    st.title("Staff Dashboard")
+    col1, col2 = st.columns(2)
+    if col1.button("🗓️ Appointment Schedule"):
+        st.session_state.staff_page = "Schedule"
+        st.rerun()
+    if col2.button("👨‍⚕️ Patient Management"):
+        st.session_state.staff_page = "Patients"
+        st.rerun()
+
+# --- Patient Management ---
 def patient_management():
     st.title("Patient Management")
     if st.button("← Back to Dashboard"):
         st.session_state.staff_page = "Dashboard"
         st.rerun()
 
-    try:
-        df = pd.read_csv(USERS_FILE)
-        patients = df[df["role"] == "Patient"]
-    except Exception as e:
-        st.error(f"Error loading patient data: {e}")
-        return
-
-    if patients.empty:
+    users = load_user_objects()
+    patients = [u for u in users.values() if isinstance(u, Patient)]
+    if not patients:
         st.warning("No patients found.")
         return
 
-    search = st.text_input("🔍 Search patient by name or ID:")
+    search = st.text_input("🔍 Search by name or ID:")
     if search:
-        filtered = patients[
-            patients["name"].str.contains(search, case=False, na=False) |
-            patients["user_id"].astype(str).str.contains(search)
-        ]
+        filtered = [p for p in patients if search.lower() in p.name.lower() or str(p.patientID) == search]
     else:
         filtered = patients
 
-    st.subheader("Patient List")
-    st.dataframe(filtered[["user_id", "name", "birthday", "email"]])
+    df = pd.DataFrame([{
+        "user_id": p.patientID,
+        "name": p.name,
+        "birthday": p.personalInfo.get("birthday"),
+        "email": p.personalInfo.get("email")
+    } for p in filtered])
+    st.dataframe(df)
 
-    selected_patient_id = st.selectbox("Select a patient to view their logs", filtered["user_id"].tolist())
-
-    if selected_patient_id and st.button(f"Show Info for Patient ID {selected_patient_id}"):
-        st.session_state.selected_patient_id = selected_patient_id
+    ids = [p.patientID for p in filtered]
+    selected_id = st.selectbox("Select a patient", ids)
+    if selected_id and st.button("Show Info"):
+        st.session_state.selected_patient_id = selected_id
         st.session_state.staff_page = "patient_details"
         st.rerun()
 
-# Patient Details Page
 def patient_details():
-    patient_id = st.session_state.get("selected_patient_id")
-    df = pd.read_csv(USERS_FILE)
-    patient = df[df["user_id"] == patient_id].iloc[0]
+    user_map = load_user_objects()
+    patient = user_map.get(st.session_state.selected_patient_id)
 
-    st.title(f"Patient Profile: {patient['name']}")
-    col1, col2, col3 = st.columns([1, 8, 3])
+    if not isinstance(patient, Patient):
+        st.error("Patient not found.")
+        return
 
-    with col1:
-        if st.button("← Back"):
-            # Go back to patient list, not dashboard
-            st.session_state.staff_page = "Patients"
-            st.rerun()
+    st.title(f"Patient Profile: {patient.name}")
+    if st.button("← Back"):
+        st.session_state.staff_page = "Patients"
+        st.rerun()
+    if st.button("➕ Add Log"):
+        st.session_state.staff_page = "add_log"
+        st.session_state.current_patient_id = patient.patientID
+        st.rerun()
 
-    with col3:
-        if st.button("➕ Add Log"):
-            st.session_state.staff_page = "add_log"
-            st.session_state.current_patient_id = patient_id
-            st.rerun()
+    st.image("https://via.placeholder.com/150", width=150)
+    st.markdown(f"**Email:** {patient.personalInfo.get('email')}")
+    st.markdown(f"**Birthday:** {patient.personalInfo.get('birthday')}")
 
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        st.image("https://via.placeholder.com/150", width=150)
-    with col2:
-        st.markdown(f"**Name:** {patient['name']}")
-        st.markdown(f"**Birthday:** {patient['birthday']}")
-        st.markdown(f"**Email:** {patient['email'] or 'N/A'}")
-        st.markdown(f"**Phone Number:** Not provided")
-
-    # Placeholder logs
-    all_logs = load_logs()
-    logs = all_logs[all_logs["patient_id"] == patient_id].to_dict("records")
-
+    logs = [l for l in load_logs().to_dict("records") if l["patient_id"] == patient.patientID]
     if logs:
         st.subheader("📄 Visit Logs")
-        log_df = pd.DataFrame(logs)[["date", "summary"]]
-        st.dataframe(log_df)
-
-        selected_log_index = st.selectbox("Select a log to view its details", range(len(logs)),
-                                          format_func=lambda idx: f"{logs[idx]['date']} - {logs[idx]['summary']}")
+        st.dataframe(pd.DataFrame(logs)[["date", "summary"]])
+        selected_log = st.selectbox("Select a log", range(len(logs)), format_func=lambda i: logs[i]["summary"])
         if st.button("➡️ Show Full Log Details"):
-            st.session_state.selected_log_index = selected_log_index
+            st.session_state.selected_log_index = selected_log
             st.session_state.staff_page = "log_details"
             st.rerun()
     else:
-        st.info("No logs available for this patient.")
-import csv
-from datetime import datetime
+        st.info("No logs for this patient.")
 
-BILLING_FILE = "data/bills.csv"
+def add_log():
+    st.title("Add New Log")
+    if st.button("← Back to Patient"):
+        st.session_state.staff_page = "patient_details"
+        st.rerun()
 
-def calculate_bill(appointment_type, insurance_level):
+    pid = st.session_state.get("current_patient_id")
+    date_val = st.date_input("Date")
+    summary = st.text_input("Summary")
+    details = st.text_area("Detailed Notes")
+
+    if st.button("Save Log"):
+        if summary and details:
+            save_log_to_file(pid, str(date_val), summary, details)
+            st.success("Log saved.")
+            st.session_state.staff_page = "patient_details"
+            st.rerun()
+        else:
+            st.warning("All fields required.")
+
+
+def log_details():
+    pid = st.session_state.get("selected_patient_id")
+    index = st.session_state.get("selected_log_index")
+    logs = [l for l in load_logs().to_dict("records") if l["patient_id"] == pid]
+
+    if index >= len(logs):
+        st.warning("Log not found.")
+        return
+    log = logs[index]
+
+    # Return button to go back to patient details
+    if st.button("← Back to Patient Details"):
+        st.session_state.staff_page = "patient_details"
+        st.rerun()
+
+    st.title("🗂️ Log Details")
+    st.markdown(f"**Date:** {log['date']}")
+    st.markdown(f"**Summary:** {log['summary']}")
+    st.markdown(f"**Details:**\n{log['details']}")
+
+    if st.button("💬 AI Suggestion"):
+        with st.spinner("Contacting GPT..."):
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a medical assistant."},
+                    {"role": "user", "content": f"Patient summary: {log['summary']}. Details: {log['details']}"}
+                ]
+            )
+            suggestion = response.choices[0].message.content
+            st.session_state.generated_chat_suggestion = suggestion
+
+    if st.session_state.get("generated_chat_suggestion"):
+        st.info(st.session_state["generated_chat_suggestion"])
+
+
+import streamlit as st
+from models import MedicalStaff, Appointment
+
+def appointment_schedule():
+    st.title("Appointment Schedule")
+
+    # Back button
+    if st.button("← Back to Dashboard"):
+        st.session_state.staff_page = "Dashboard"
+        st.rerun()
+
+    # 1. Ensure staff is a MedicalStaff object
+    user = st.session_state.get("user")
+    if not isinstance(user, MedicalStaff):
+        st.error("Access Denied: Staff only.")
+        return
+    staff: MedicalStaff = user
+
+    # 2. Load all appointments and filter
+    appointments = load_appointment_objects()
+    staff_appts = [a for a in appointments if a.staffID == staff.staffID]
+
+    if not staff_appts:
+        st.write("No appointments.")
+        return
+
+    # 3. Display each appointment
+    for appt in staff_appts:
+        with st.expander(f"Appointment {appt.appointmentID}"):
+            st.write(f"📅 Date: **{appt.date}**")
+            st.write(f"🧑 Patient ID: **{appt.patientID}**")
+            st.write(f"📄 Type: **{appt.type}**")
+            st.markdown(f"[🔗 Join Meeting]({appt.info})", unsafe_allow_html=True)
+
+            # End & Bill button
+            if st.button("🧾 End & Bill", key=f"end_{appt.appointmentID}"):
+                st.session_state.selected_appointment = appt  # store the object
+                st.session_state.staff_page = "end_appointment"
+                st.rerun()
+
+def calculate_bill(appointment_type: str, insurance_level: str) -> float:
     base_prices = {
         "check up": 200,
         "emergency": 1000,
         "surgery": 5000,
-        "follow up": 150
+        "follow up": 150,
+        "consultation": 250  # optional extra
     }
 
     discounts = {
@@ -137,270 +323,37 @@ def calculate_bill(appointment_type, insurance_level):
         "none": 0.0
     }
 
-    base_price = base_prices.get(appointment_type.lower(), 0)
-    discount = discounts.get(insurance_level.lower(), 0)
-    return round(base_price * (1 - discount), 2)
+    base_type = appointment_type.strip().lower()
+    base_price = base_prices.get(base_type, 0)
 
-def end_appointment(appointment):
-    st.subheader("🏁 End Appointment & Generate Bill")
+    level = insurance_level.strip().lower()
+    discount = discounts.get(level, 0.0)
 
-    patient_id = appointment["patient_id"]
-    patient_df = pd.read_csv(USERS_FILE)
-    patient = patient_df[patient_df["user_id"] == patient_id].iloc[0]
+    final_price = base_price * (1 - discount)
+    return round(final_price, 2)
 
-    insurance_level = patient.get("insurance_level", "none") or "none"
-    final_bill = calculate_bill(appointment["type"], insurance_level)
 
-    st.markdown(f"**Appointment Type:** {appointment['type']}")
-    st.markdown(f"**Patient Insurance Level:** {insurance_level.capitalize()}")
-    st.markdown(f"💰 **Final Bill:** AED {final_bill}")
+def end_appointment(appointment_dict):
+    # Extract the appointment details from the object and pass them as a dictionary
+    appt = Appointment(**appointment_dict.__dict__)  # Use __dict__ to get the object's attributes
+
+    st.subheader("🏁 End Appointment")
+    users = load_user_objects()
+    patient = users.get(appt.patientID)
+
+    insurance = patient.personalInfo.get("insurance_level", "none") if patient else "none"
+    amount = calculate_bill(appt.type, insurance)
+
+    st.markdown(f"💰 **Amount:** AED {amount} (Insurance: {insurance.capitalize()})")
 
     if st.button("✔️ Confirm & Save Bill"):
-        bill_entry = {
-            "bill_id": str(uuid.uuid4()),
-            "patient_id": patient_id,
-            "appointment_id": appointment["appointment_id"],
-            "appointment_type": appointment["type"],
-            "insurance_level": insurance_level,
-            "amount": final_bill,
-            "date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "status":"pending"
-        }
+        bill = Bill(str(uuid.uuid4()), appt.patientID, appt.appointmentID, amount, paid=False)
+        save_bills_to_csv(bill)
 
-        # Save to CSV
-        file_exists = os.path.exists(BILLING_FILE)
-        with open(BILLING_FILE, mode='a', newline='') as file:
-            writer = csv.DictWriter(file, fieldnames=bill_entry.keys())
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(bill_entry)
+        # Update the appointments list without this one
+        appointments = [a for a in load_appointment_objects() if a.appointmentID != appt.appointmentID]
+        save_appointments_to_csv(appointments)
 
-        st.success("✅ Bill saved successfully.")
-
-        # ✅ Remove appointment
-        appointments_df = load_appointments()
-        appointments_df = appointments_df[appointments_df["appointment_id"] != appointment["appointment_id"]]
-        appointments_df.to_csv(APPOINTMENTS_FILE, index=False)
-
+        st.success("✅ Bill saved & appointment removed.")
         st.session_state.staff_page = "Schedule"
         st.rerun()
-
-
-def log_details():
-    # Get patient_id and log_index from session_state
-    patient_id = st.session_state.get("selected_patient_id")
-    log_index = st.session_state.get("selected_log_index")
-
-    col1, col2 = st.columns([1, 10])
-    with col1:
-        if st.button("← Back"):
-            st.session_state.staff_page = "patient_details"
-            st.rerun()
-
-    # Check for missing selections
-    if patient_id is None or log_index is None:
-        st.warning("Missing patient or log selection.")
-        return
-
-    all_logs = load_logs()
-    logs = all_logs[all_logs["patient_id"] == patient_id].to_dict("records")
-
-    # Check if log_index is out of bounds
-    if log_index >= len(logs):
-        st.warning("Log not found.")
-        return
-
-    log = logs[log_index]
-
-    try:
-        df = pd.read_csv(USERS_FILE)
-        patient = df[df["user_id"] == patient_id].iloc[0]
-    except Exception as e:
-        st.error(f"Error loading patient info: {e}")
-        return
-
-    st.title(f"🗂️ Detailed Log for {patient['name']}")
-    st.markdown(f"**Date:** {log['date']}")
-    st.markdown(f"**Summary:** {log['summary']}")
-    st.markdown(f"**Detailed Notes:**\n{log['details']}")
-    st.divider()
-
-    st.markdown("### 🧠 AI Diagnosis Suggestion")
-
-    if st.button("💬 Get Medical Suggestion via GPT"):
-        with st.spinner("Contacting AI..."):
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system",
-                     "content": "You are a helpful medical assistant to a doctor. Provide suggestions based on symptoms."},
-                    {"role": "user", "content": f"Patient log summary: {log['summary']}\nDetails: {log['details']}"}
-                ],
-                temperature=0.5,
-                max_tokens=200
-            )
-            suggestion = response.choices[0].message.content
-            st.session_state.generated_chat_suggestion = suggestion
-
-    if st.session_state.get("generated_chat_suggestion"):
-        st.info(st.session_state["generated_chat_suggestion"])
-
-def add_log():
-    st.title("Add New Log")
-
-    if st.button("← Back to Patient"):
-        st.session_state.staff_page = "patient_details"
-        st.rerun()
-
-    patient_id = st.session_state.get("current_patient_id")
-    if not patient_id:
-        st.error("No patient selected.")
-        return
-
-    log_date = st.date_input("Log Date")
-    summary = st.text_input("Summary")
-    details = st.text_area("Detailed Notes")
-
-    if st.button("Save Log"):
-        if summary and details:
-            new_log = {
-                "date": str(log_date),
-                "summary": summary,
-                "details": details,
-            }
-            save_log_to_file(patient_id, log_date, summary, details)
-            st.success("Log saved successfully.")
-            st.session_state.staff_page = "patient_details"
-            st.rerun()
-        else:
-            st.warning("Please fill in all fields.")
-
-def appointment_schedule():
-    if st.button("← Back to Dashboard"):
-        st.session_state.staff_page = "Dashboard"
-        st.rerun()
-    st.title("Appointment Schedule")
-
-
-
-    user = st.session_state.get("user", {
-        "user_id": 1,
-        "role": "Staff",
-        "schedule": "9AM–5PM",
-        "position": "General Physician"
-    })
-
-    if user["role"] != "Staff":
-        st.error("Access Denied")
-        return
-
-    st.sidebar.subheader(f"Work Hours: {user['schedule']}")
-    st.sidebar.text(f"Position: {user['position']}")
-
-    appointments = load_appointments()
-    staff_appointments = appointments[appointments['staff_id'] == user['user_id']]
-
-    if staff_appointments.empty:
-        st.write("No upcoming appointments.")
-    else:
-        st.subheader("Upcoming Appointments")
-        for _, appt in staff_appointments.iterrows():
-            with st.expander(f"Appointment {appt['appointment_id']}"):
-                st.write(f"📅 Date: **{appt['date']}**")
-                st.write(f"⏰ Time: **{appt['time']}**")
-                st.write(f"🧑 Patient ID: {appt['patient_id']}")
-                st.write(f"📄 Type: {appt['type']}")
-                st.markdown(f"[🔗 Join Meeting]({appt['meeting_link']})", unsafe_allow_html=True)
-                if st.button("🧾 End Appointment & Generate Bill", key=f"end_appt_{appt['appointment_id']}"):
-                    st.session_state.selected_appointment = appt.to_dict()  # Fix this to use the current appointment
-                    st.session_state.staff_page = "end_appointment"
-                    st.rerun()
-
-                if st.button(f"🛠 Modify Appointment {appt['appointment_id']}",
-                             key=f"mod_appt_{appt['appointment_id']}"):
-                    st.session_state.modify_appt_id = appt['appointment_id']
-                    st.rerun()
-
-                if st.session_state.get("modify_appt_id") == appt['appointment_id']:
-                    with st.form(f"modify_form_{appt['appointment_id']}"):
-                        new_date = st.date_input("Date", pd.to_datetime(appt['date']))
-                        new_time = st.time_input("Time", pd.to_datetime(appt['time']).time())
-                        new_type = st.selectbox(
-                            "Appointment Type",
-                            ["check up", "emergency", "surgery", "follow up"],
-                            index=["check up", "emergency", "surgery", "follow up"].index(appt['type']) if appt[
-                                                                                                               'type'] in [
-                                                                                                               "check up",
-                                                                                                               "emergency",
-                                                                                                               "surgery",
-                                                                                                               "follow up"] else 0
-                        )
-                        new_link = st.text_input("Meeting Link", appt['meeting_link'])
-                        submitted = st.form_submit_button("💾 Save Changes")
-
-                        if submitted:
-                            appointments.loc[
-                                appointments['appointment_id'] == appt['appointment_id'], ['date', 'time', 'type',
-                                                                                           'meeting_link']] = [
-                                str(new_date), str(new_time), new_type, new_link
-                            ]
-                            appointments.to_csv(APPOINTMENTS_FILE, index=False)
-                            st.success("Appointment updated!")
-                            del st.session_state.modify_appt_id
-                            st.rerun()
-
-
-def sidebar_navigation():
-    st.sidebar.title("Navigation")
-    options = ["Dashboard", "Patients", "Schedule"]
-
-    if "staff_page" not in st.session_state:
-        st.session_state.staff_page = "Dashboard"
-
-    current_page = st.session_state.staff_page
-    selected = st.sidebar.radio("Go to", options, index=options.index(current_page) if current_page in options else 0)
-
-    # Only change page if user actually clicks a new one
-    if selected != current_page and st.session_state.staff_page in options:
-        st.session_state.staff_page = selected
-        st.rerun()
-
-
-def render_staff_home():
-    st.title("Staff Dashboard")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🗓️ Appointment Schedule"):
-            st.session_state.staff_page = "Schedule"
-            st.rerun()
-    with col2:
-        if st.button("👨‍⚕️ Patient Management"):
-            st.session_state.staff_page = "Patients"
-            st.rerun()
-def staff_dashboard():
-    # Important: Set default BEFORE any other logic
-    if "staff_page" not in st.session_state:
-        st.session_state["staff_page"] = "Dashboard"
-
-    st.sidebar.write("DEBUG: staff_page =", st.session_state.get("staff_page"))
-
-    sidebar_navigation()  # Don't override the page unless user selects a new one
-
-    match st.session_state.staff_page:
-        case "Patients":
-            patient_management()
-        case "Schedule":
-            appointment_schedule()
-        case "patient_details":
-            patient_details()
-        case "log_details":
-            log_details()
-        case "add_log":
-            add_log()
-        case "end_appointment":
-            end_appointment(st.session_state.selected_appointment)
-        case _:
-            render_staff_home()
-
-# Run the dashboard
-staff_dashboard()
