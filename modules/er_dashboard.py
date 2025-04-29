@@ -1,57 +1,106 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import random
 
-# Example ER Staff appointments (you can replace this with real data)
-appointments = {
-    "appointment_id": [1, 2, 3],
-    "patient_name": ["John Doe", "Jane Smith", "Jim Brown"],
-    "doctor_name": ["Dr. White", "Dr. Black", "Dr. Green"],
-    "appointment_time": [datetime(2025, 4, 20, 9, 0), datetime(2025, 4, 20, 10, 0), datetime(2025, 4, 20, 11, 0)],
-    "appointment_type": ["Emergency", "Emergency", "Non-Emergency"]
-}
 
-# Convert to a DataFrame
-df_appointments = pd.DataFrame(appointments)
+# Load emergency cases from CSV
+@st.cache_data
+def load_emergencies():
+    try:
+        df = pd.read_csv('data/appointments.csv')
+        emergencies = df[df['type'].str.contains('Emergency', case=False)]
+
+        if not emergencies.empty:
+            # Add emergency-specific fields
+            emergencies['severity'] = ['High', 'Critical', 'Medium'][:len(emergencies)]
+            emergencies['status'] = ['New', 'In Progress'][:len(emergencies)]
+            emergencies['location'] = ['123 Main St', '456 Oak Ave', '789 Pine Rd'][:len(emergencies)]
+        return emergencies
+
+    except FileNotFoundError:
+        st.error("Emergency data file not found")
+        return pd.DataFrame()
+
 
 # ER Staff Dashboard
 def er_dashboard():
-    st.title("ER Staff Dashboard")
+    st.title("Emergency Cases Dashboard")
 
-    # Load user and check if role is ER Staff
-    user = st.session_state.user
-    if user["role"] != "ER Staff":
-        st.error("Access Denied: You are not authorized to view this page.")
+    # Load emergency data
+    df_emergencies = load_emergencies()
+
+    if df_emergencies.empty:
+        st.warning("No emergency cases found")
         return
 
-    # ER Staff work hours (dummy data for now)
-    st.sidebar.subheader("ER Staff Work Hours")
-    st.sidebar.write("Work Hours: 9:00 AM - 5:00 PM (Mon to Fri)")  # This is editable by the admin
+    # Create display IDs if they don't exist
+    if 'appointment_id' not in df_emergencies.columns:
+        df_emergencies['appointment_id'] = range(1, len(df_emergencies) + 1)
 
-    # View Appointments
-    st.subheader("Upcoming Appointments")
-    st.write(df_appointments[["appointment_id", "patient_name", "doctor_name", "appointment_time", "appointment_type"]])
+    # Search section
+    st.subheader("Search Emergency Cases")
+    search_query = st.text_input(
+        "Search by Patient ID or Case ID",
+        "",
+        placeholder="Enter ID (e.g., 1 or 1001)"
+    )
 
-    # Join Virtual Meetings
-    st.subheader("Virtual Meeting Links")
-    meeting_link = st.text_input("Enter Appointment ID to Join Meeting", "")
-    if meeting_link:
-        st.write(f"Join the virtual meeting for appointment {meeting_link}")
-        # You can add your logic for joining the meeting here (e.g., redirect to a URL)
+    # Apply search filter
+    filtered_data = df_emergencies.copy()
+    if search_query:
+        filtered_data = filtered_data[
+            filtered_data['patient_id'].astype(str).str.contains(search_query, case=False) |
+            filtered_data['appointment_id'].astype(str).str.contains(search_query, case=False)
+            ]
 
-    # View Patient Medical History (Limited access)
-    patient_id = st.text_input("Enter Patient ID to View Medical History", "")
-    if patient_id:
-        st.write(f"Viewing limited medical history for Patient ID {patient_id}")
-        # Dummy data for the medical history
-        medical_history = {
-            "date": ["2025-04-10", "2025-04-18"],
-            "summary": ["Initial ER visit for fever", "Follow-up after ER visit for fever"]
-        }
-        history_df = pd.DataFrame(medical_history)
-        st.write(history_df)
+    # Emergency cases table
+    st.subheader("Active Emergency Cases")
+    st.dataframe(
+        filtered_data[["appointment_id", "patient_id", "type", "severity", "date", "time", "status"]],
+        column_config={
+            "appointment_id": "Case ID",
+            "patient_id": "Patient ID",
+            "type": "Emergency Type",
+            "severity": "Severity",
+            "date": "Date",
+            "time": "Time",
+            "status": "Status"
+        },
+        hide_index=True,
+        use_container_width=True
+    )
 
-    # Back button
-    if st.button("Back to Dashboard"):
-        st.session_state.user = None  # Log the user out or redirect to a homepage
-        st.rerun()
+    # Detailed view when a case is selected
+    if search_query and not filtered_data.empty:
+        case_data = filtered_data.iloc[0]
+
+        st.divider()
+        st.subheader(f"Emergency Details: Case #{case_data['appointment_id']}")
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.markdown(f"""
+            **Patient ID:** {case_data['patient_id']}  
+            **Emergency Type:** {case_data['type']}  
+            **Severity:** {case_data['severity']}  
+            **Status:** {case_data['status']}  
+            **Reported On:** {case_data['date']} at {case_data['time']}  
+            **Location:** {case_data.get('location', 'Unknown')}
+            """)
+
+            # Simulated map
+            st.markdown("### Emergency Location")
+            st.image("https://cdn.prod.website-files.com/5c29380b1110ec92a203aa84/66e5ce469b48938aa34d8684_Google%20Maps%20-%20Compressed.jpg",
+                     caption=f"Location: {case_data.get('location', 'Unknown')}")
+
+        with col2:
+            st.markdown("### Emergency Response")
+            if st.button("Dispatch Ambulance", type="primary"):
+                st.success("Ambulance dispatched to location")
+
+
+# For testing without the full app
+if __name__ == "__main__":
+    er_dashboard()
