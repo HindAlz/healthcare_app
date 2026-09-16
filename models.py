@@ -1,33 +1,33 @@
-from datetime import datetime
-
+"""Domain objects used by the Streamlit prototype."""
 class Patient:
+    role = 'Patient'
     def __init__(self, patientID, name, personalInfo, medicalHistory=None):
         self.patientID = patientID
         self.name = name
-        self.personalInfo = personalInfo
-        self.medicalHistory = (
-            list(medicalHistory) if medicalHistory is not None else []
-        )
+        self.personalInfo = dict(personalInfo)
+        self.medicalHistory = list(medicalHistory) if medicalHistory is not None else []
+
     def addHistory(self, day, month, year, details):
-        self.medicalHistory.append({
-            "date": f"{day}-{month}-{year}",
-            "details": details
-        })
+        self.medicalHistory.append({'date': f'{day:02d}-{month:02d}-{year:04d}', 'details': details})
 
 class MedicalStaff:
-    def __init__(self, staffID, name, personalInfo, schedule, position):
+    role = 'Staff'
+    def __init__(self, staffID, name, personalInfo, schedule='', position=''):
         self.staffID = staffID
         self.name = name
-        self.personalInfo = personalInfo
+        self.personalInfo = dict(personalInfo)
         self.schedule = schedule
         self.position = position
 
+class ERStaff(MedicalStaff):
+    role = 'ER'
+
 class ManagementStaff(MedicalStaff):
-    def __init__(self, staffID, name, personalInfo, schedule, position, resources=None):
+    role = 'Admin'
+    def __init__(self, staffID, name, personalInfo, schedule='', position='', resources=None):
         super().__init__(staffID, name, personalInfo, schedule, position)
-        self.resources = (
-            list(resources) if resources is not None else []
-        )
+        self.resources = list(resources) if resources is not None else []
+
 class Appointment:
     def __init__(self, appointmentID, date, patientID, staffID, info, type):
         self.appointmentID = appointmentID
@@ -44,7 +44,6 @@ class Bill:
         self.appointmentID = appointmentID
         self.amount = amount
         self.paid = paid
-
     def pay(self):
         self.paid = True
 
@@ -54,9 +53,9 @@ class Resource:
         self.name = name
         self.expiryDate = expiryDate
         self.stock = stock
-
     def restock(self, amount):
+        if amount < 0:
+            raise ValueError('Restock amount must be non-negative.')
         self.stock += amount
-
     def is_low(self):
-        return self.stock < 10  # example threshold
+        return self.stock < 10

@@ -1,12 +1,10 @@
+"""Toy classifier only: two invented examples, no clinical validity."""
 from sklearn.tree import DecisionTreeClassifier
 import numpy as np
 
-# Placeholder model for demo purposes
-model = DecisionTreeClassifier()
-X = np.array([[1, 0, 1, 1], [0, 1, 0, 0]])  # symptoms etc.
-y = [1, 0]
-model.fit(X, y)
+model = DecisionTreeClassifier(random_state=42)
+model.fit(np.array([[1, 0, 1, 1], [0, 1, 0, 0]]), [1, 0])
 
 def predict_risk(user_input):
-    pred = model.predict([user_input])
-    return "High risk of diabetes" if pred[0] == 1 else "Low risk"
+    prediction = model.predict([user_input])[0]
+    return f"Demo classification: {'High' if prediction == 1 else 'Low'} (unvalidated; not a health assessment)"

@@ -1,163 +1,118 @@
-import streamlit as st
-import pandas as pd
+"""Local demo authentication with per-password salts and legacy hash migration."""
 import hashlib
-import os
-from datetime import datetime
+import hmac
+import secrets
+from datetime import date
+import pandas as pd
+import streamlit as st
+from models import Patient, MedicalStaff, ManagementStaff, ERStaff
+from storage import read_table, write_table, next_numeric_id
 
-from models import Patient, MedicalStaff, ManagementStaff  # adjust this import
+PBKDF2_ITERATIONS = 600_000
 
-USER_FILE = "data/users.csv"
-os.makedirs("data", exist_ok=True)
+def hash_password(password):
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt), PBKDF2_ITERATIONS).hex()
+    return f'pbkdf2_sha256${PBKDF2_ITERATIONS}${salt}${digest}'
 
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode()).hexdigest()
-
-def load_users_df() -> pd.DataFrame:
+def verify_password(password, stored):
+    if not isinstance(stored, str):
+        return False
     try:
-        return pd.read_csv(USER_FILE)
-    except FileNotFoundError:
-        return pd.DataFrame(
-            columns=[
-                "user_id", "username", "password", "role", "name",
-                "birthday", "email", "position", "specialization", "schedule"
-            ]
-        )
+        if stored.startswith('pbkdf2_sha256$'):
+            algorithm, rounds, salt, expected = stored.split('$')
+            digest = hashlib.pbkdf2_hmac('sha256', password.encode(), bytes.fromhex(salt), int(rounds)).hex()
+            return hmac.compare_digest(digest, expected)
+        # Existing SHA-256 accounts can log in once and are then upgraded.
+        if len(stored) == 64 and all(c in '0123456789abcdefABCDEF' for c in stored):
+            return hmac.compare_digest(hashlib.sha256(password.encode()).hexdigest(), stored.lower())
+    except (ValueError, TypeError, OverflowError):
+        pass
+    return False
 
-def save_users_df(df: pd.DataFrame):
-    df.to_csv(USER_FILE, index=False)
+def load_users_df():
+    return read_table('users.csv')
 
-def _make_user_object(row: pd.Series):
-    """Helper: turn one user-row into a Patient or Staff object."""
-    personal_info = {
-        "email": row["email"],
-        "birthday": row["birthday"],
-        "username": row["username"],
-        "specialization": row.get("specialization", ""),
-    }
-    role = row["role"]
-    uid = row["user_id"]
-    name = row["name"]
+def save_users_df(df):
+    write_table(df, 'users.csv')
 
-    if role == "Patient":
-        return Patient(patientID=uid, name=name, personalInfo=personal_info)
-    elif role == "Admin":
-        # Admin gets ManagementStaff (with an empty resources list by default)
-        return ManagementStaff(
-            staffID=uid,
-            name=name,
-            personalInfo=personal_info,
-            schedule=row.get("schedule", ""),
-            position=row.get("position", ""),
-            resources=[]
-        )
-    else:
-        # Staff and ER both use MedicalStaff
-        return MedicalStaff(
-            staffID=uid,
-            name=name,
-            personalInfo=personal_info,
-            schedule=row.get("schedule", ""),
-            position=row.get("position", "")
-        )
+def _make_user_object(row):
+    personal = {key: row.get(key, '') for key in ('email', 'birthday', 'username', 'specialization', 'insurance_level')}
+    role = row['role']
+    uid = int(row['user_id'])
+    if role == 'Patient':
+        return Patient(uid, row['name'], personal)
+    classes = {'Admin': ManagementStaff, 'Staff': MedicalStaff, 'ER': ERStaff}
+    if role not in classes:
+        raise ValueError('Unknown account role.')
+    return classes[role](uid, row['name'], personal, row.get('schedule', ''), row.get('position', ''))
+
+def authenticate(username, password):
+    df = load_users_df()
+    matches = df.index[df['username'].str.casefold() == username.strip().casefold()]
+    if len(matches) != 1:
+        return None
+    index = matches[0]
+    stored = df.at[index, 'password']
+    if not verify_password(password, stored):
+        return None
+    try:
+        user = _make_user_object(df.loc[index])
+    except ValueError:
+        return None
+    if not stored.startswith('pbkdf2_sha256$'):
+        df.at[index, 'password'] = hash_password(password)
+        save_users_df(df)
+    return user
+
+def register_patient(username, password, name, birthday, email):
+    username, name, email = username.strip(), name.strip(), email.strip()
+    if not all((username, password, name, email)):
+        raise ValueError('Please fill all required fields.')
+    if len(password) < 12:
+        raise ValueError('Use a password with at least 12 characters.')
+    if '@' not in email:
+        raise ValueError('Enter a valid email address.')
+    df = load_users_df()
+    if username.casefold() in set(df['username'].str.casefold()):
+        raise ValueError('Username already exists.')
+    record = {'user_id': next_numeric_id(df, 'user_id'), 'username': username,
+              'password': hash_password(password), 'role': 'Patient', 'name': name,
+              'birthday': birthday.isoformat(), 'email': email,
+              'position': '', 'specialization': '', 'schedule': ''}
+    save_users_df(pd.concat([df, pd.DataFrame([record])], ignore_index=True))
+    return _make_user_object(pd.Series(record))
 
 def login():
-    st.subheader("🔐 Login")
-    username = st.text_input("Username", key="login_username")
-    password = st.text_input("Password", type="password", key="login_password")
-
-    if st.button("Log In"):
-        df = load_users_df()
-        user_row = df[df["username"] == username]
-        if not user_row.empty:
-            user_row = user_row.iloc[0]
-            if user_row["password"] == hash_password(password):
-                user_obj = _make_user_object(user_row)
-                st.success("Login successful")
-                return user_obj
-        st.error("Invalid username or password.")
+    st.subheader('Login')
+    with st.form('login_form'):
+        username = st.text_input('Username', key='login_username')
+        password = st.text_input('Password', type='password', key='login_password')
+        submitted = st.form_submit_button('Log In')
+    if submitted:
+        user = authenticate(username, password)
+        if user is not None:
+            return user
+        st.error('Invalid username or password.')
     return None
 
-
 def sign_up():
-    st.subheader("✍️ Sign Up")
-    with st.form("signup_form"):
-        username = st.text_input("Username")
-        password = st.text_input("Password", type="password")
-        confirm = st.text_input("Confirm Password", type="password")
-
-        # Only allow "Patient" role to be selected
-        role = st.selectbox("Role", ["Patient"])  # Removed Staff, Admin, ER options
-        name = st.text_input("Full Name")
-        birthday = st.date_input("Birthday")
-        email = st.text_input("Email")
-
-
-        submitted = st.form_submit_button("Create Account")
-        if not submitted:
-            return None
-
-        # validate
+    st.subheader('Create a patient account')
+    with st.form('signup_form'):
+        username = st.text_input('Username')
+        password = st.text_input('Password', type='password')
+        confirm = st.text_input('Confirm Password', type='password')
+        name = st.text_input('Full Name')
+        birthday = st.date_input('Birthday', value=date(2000, 1, 1), min_value=date(1900, 1, 1), max_value=date.today())
+        email = st.text_input('Email')
+        submitted = st.form_submit_button('Create Account')
+    if submitted:
         if password != confirm:
-            st.error("Passwords do not match.")
-            return None
-        if not (username and password and name and email):
-            st.error("Please fill all required fields.")
-            return None
-
-        # load & uniqueness
-        df = load_users_df()
-        if username in df["username"].values:
-            st.error("Username already exists.")
-            return None
-
-        # append new row
-        existing_ids = pd.to_numeric(
-            df["user_id"],
-            errors="coerce"
-        ).dropna()
-
-        new_id = (
-            int(existing_ids.max()) + 1
-            if not existing_ids.empty
-            else 1
-        )
-        new_row = {
-            "user_id": new_id,
-            "username": username,
-            "password": hash_password(password),
-            "role": role,  # Always set to "Patient"
-            "name": name,
-            "birthday": birthday.strftime("%Y-%m-%d"),
-            "email": email,
-
-        }
-        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        save_users_df(df)
-
-        # build and return the new object
-        user_obj = _make_user_object(pd.Series(new_row))
-        st.success("Account created! You can now log in.")
-        return user_obj
-
-
-# Example usage in your main Streamlit script:
-def main():
-    if "user" not in st.session_state:
-        choice = st.radio("Choose action", ["Log In", "Sign Up"])
-        if choice == "Log In":
-            user = login()
-        else:
-            user = sign_up()
-
-        if user:
-            st.session_state.user = user
-            st.experimental_rerun()
-
-    # once logged in:
-    if "user" in st.session_state:
-        user = st.session_state.user
-        st.write(f"👋 Hello, {user.name} ({type(user).__name__})")
-        # … proceed to patient_dashboard(), staff_dashboard(), etc.
-
-if __name__ == "__main__":
-    main()
+            st.error('Passwords do not match.')
+            return
+        try:
+            register_patient(username, password, name, birthday, email)
+        except ValueError as exc:
+            st.error(str(exc))
+            return
+        st.success('Account created. Select Login to continue.')
