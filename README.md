@@ -52,8 +52,6 @@ The app works without an API key or the OpenAI SDK. To enable the optional demo:
 3. Use a model available to your project that supports Chat Completions.
 4. Open a staff visit log, confirm it contains synthetic data, and request a summary.
 
-That action sends the displayed summary and notes to OpenAI. Do not enter real patient information into this demo. Never commit a key or paste it into Python source. A `.env` file is not loaded automatically; use operating-system environment variables.
-
 ## Structure
 
 | File | Purpose |
@@ -68,20 +66,3 @@ That action sends the displayed summary and notes to OpenAI. Do not enter real p
 | `run_demo.py` | Launch with the isolated demo directory |
 | `tests/test_regressions.py` | Regression checks using temporary synthetic records |
 
-## Validation
-
-Run the business-logic checks from the project directory:
-
-```bash
-python -m unittest discover -s tests -v
-```
-
-The supplied fixes passed 14 regression checks during preparation. Streamlit was unavailable in that environment, so only its import was stubbed for these checks. Full browser behavior and live API calls were not tested. Complete the walkthrough in `APPLY_FIXES.md` before presenting the project.
-
-## Limitations
-
-- CSV persistence is intended for a local demonstration. Individual writes are atomic, but operations across files are not transactions; concurrent sessions can still conflict. Use a database and transaction-based operations before multi-user deployment.
-- Payments are status changes only. The app does not process payments, generate receipts, or dispatch ambulances.
-- The ML examples are unvalidated and provide no meaningful personal health assessment.
-- Login has no rate limiting, password reset, or production session infrastructure. Publicly exposed legacy credentials must still be reset/revoked; automatic password-hash migration does not make a leaked password private again.
-- The repository should contain only code and synthetic demo generation scripts, not real patient records or usable credentials.
