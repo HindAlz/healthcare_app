@@ -20,7 +20,11 @@ def main():
 
     if st.session_state.user:
         # Access the role directly from the object
-        role = st.session_state.user.__class__.__name__
+        role = getattr(
+            st.session_state.user,
+            "role",
+            st.session_state.user.__class__.__name__
+        )
         st.sidebar.success(f"Logged in as {st.session_state.user.name} ({role})")
         st.sidebar.button("Logout", on_click=logout)
 
@@ -30,12 +34,12 @@ def main():
 
         elif isinstance(st.session_state.user, ManagementStaff):
             admin_dashboard()
+            
+        elif role == "ER":
+            er_dashboard()
 
         elif isinstance(st.session_state.user, MedicalStaff):
             staff_dashboard()
-
-        elif role == "ER":
-            er_dashboard()
 
         else:
             st.error("Unknown user role.")
