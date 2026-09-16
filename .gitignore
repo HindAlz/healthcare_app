@@ -1,0 +1,18 @@
+# Environments and local secrets
+venv/
+.venv/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+# Python and editor output
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+.DS_Store
+# Mutable local/demo data: generate with seed_demo.py
+data/*.csv
+data/**/*.csv
+*.tmp

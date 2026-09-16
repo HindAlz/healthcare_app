@@ -1,7 +1,0 @@
-device_id,name,available,next_maintenance,low_available
-DEV001,Defibrillator,3,2025-05-15,3
-DEV002,X-Ray Machine,5,2025-07-01,2
-DEV003,ECG Machine,8,2025-06-10,3
-DEV004,Patient Monitor,15,2025-08-20,4
-DEV005,IV Pump,6,2025-05-25,2
-,,5,2025-04-29,3
