@@ -111,7 +111,16 @@ def sign_up():
             return None
 
         # append new row
-        new_id = int(df["user_id"].max() or 0) + 1
+        existing_ids = pd.to_numeric(
+            df["user_id"],
+            errors="coerce"
+        ).dropna()
+
+        new_id = (
+            int(existing_ids.max()) + 1
+            if not existing_ids.empty
+            else 1
+        )
         new_row = {
             "user_id": new_id,
             "username": username,
