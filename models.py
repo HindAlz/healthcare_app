@@ -1,12 +1,13 @@
 from datetime import datetime
 
 class Patient:
-    def __init__(self, patientID, name, personalInfo, medicalHistory=[]):
+    def __init__(self, patientID, name, personalInfo, medicalHistory=None):
         self.patientID = patientID
         self.name = name
         self.personalInfo = personalInfo
-        self.medicalHistory = medicalHistory
-
+        self.medicalHistory = (
+            list(medicalHistory) if medicalHistory is not None else []
+        )
     def addHistory(self, day, month, year, details):
         self.medicalHistory.append({
             "date": f"{day}-{month}-{year}",
@@ -22,10 +23,11 @@ class MedicalStaff:
         self.position = position
 
 class ManagementStaff(MedicalStaff):
-    def __init__(self, staffID, name, personalInfo, schedule, position, resources=[]):
+    def __init__(self, staffID, name, personalInfo, schedule, position, resources=None):
         super().__init__(staffID, name, personalInfo, schedule, position)
-        self.resources = resources
-
+        self.resources = (
+            list(resources) if resources is not None else []
+        )
 class Appointment:
     def __init__(self, appointmentID, date, patientID, staffID, info, type):
         self.appointmentID = appointmentID
