@@ -16,20 +16,51 @@ from models import Bill
 
 
 def save_bills_to_csv(bills: Union[Bill, List[Bill]]):
-    # Allow a single Bill or a list
     if isinstance(bills, Bill):
         bills = [bills]
 
-    data = [{
-        "bill_id": bill.billID,
-        "patient_id": bill.patientID,
-        "appointment_id": bill.appointmentID,
-        "amount": bill.amount,
-        "status": "Paid" if bill.paid else "Unpaid"
-    } for bill in bills]
+    if not bills:
+        return
 
-    df = pd.DataFrame(data)
-    df.to_csv(BILLING_FILE, index=False)
+    columns = [
+        "bill_id",
+        "patient_id",
+        "appointment_id",
+        "amount",
+        "status",
+    ]
+
+    new_rows = pd.DataFrame([
+        {
+            "bill_id": str(bill.billID),
+            "patient_id": bill.patientID,
+            "appointment_id": bill.appointmentID,
+            "amount": bill.amount,
+            "status": "Paid" if bill.paid else "Unpaid",
+        }
+        for bill in bills
+    ], columns=columns)
+
+    try:
+        existing = pd.read_csv(
+            BILLING_FILE,
+            dtype={"bill_id": str},
+        )
+    except (FileNotFoundError, pd.errors.EmptyDataError):
+        existing = pd.DataFrame(columns=columns)
+
+    # Replace matching bills while preserving all other bills.
+    existing = existing[
+        ~existing["bill_id"].isin(new_rows["bill_id"])
+    ]
+
+    updated = pd.concat(
+        [existing, new_rows],
+        ignore_index=True,
+    )
+
+    os.makedirs(os.path.dirname(BILLING_FILE), exist_ok=True)
+    updated.to_csv(BILLING_FILE, index=False)
 
 
 def save_appointments_to_csv(appointments: list):
@@ -90,7 +121,8 @@ def load_appointment_objects():
     return appointments
 
 # --- AI Setup ---
-client = OpenAI(api_key="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")  # Store securely in env in prod
+api_key = os.environ.get("OPENAI_API_KEY")
+client = OpenAI(api_key=api_key) if api_key else None
 APPOINTMENTS_FILE = "data/appointments.csv"
 USERS_FILE = "data/users.csv"
 LOGS_FILE = "data/logs.csv"
@@ -252,6 +284,13 @@ def log_details():
     st.markdown(f"**Details:**\n{log['details']}")
 
     if st.button("💬 AI Suggestion"):
+        if client is None:
+            st.warning(
+                "AI suggestions are disabled. "
+                "Configure OPENAI_API_KEY locally to enable them."
+            )
+            return
+
         with st.spinner("Contacting GPT..."):
             response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -309,11 +348,13 @@ def appointment_schedule():
 
 def calculate_bill(appointment_type: str, insurance_level: str) -> float:
     base_prices = {
+        "checkup": 200,
         "check up": 200,
         "emergency": 1000,
         "surgery": 5000,
+        "follow-up": 150,
         "follow up": 150,
-        "consultation": 250  # optional extra
+        "consultation": 250,
     }
 
     discounts = {
