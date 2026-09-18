@@ -66,3 +66,5 @@ The app works without an API key or the OpenAI SDK. To enable the optional demo:
 | `run_demo.py` | Launch with the isolated demo directory |
 | `tests/test_regressions.py` | Regression checks using temporary synthetic records |
 
+<img width="2870" height="1508" alt="image" src="https://github.com/user-attachments/assets/1a1757dd-e61e-40b0-96bc-49a4a4521411" />
+<img width="2880" height="1496" alt="image2" src="https://github.com/user-attachments/assets/fd873e81-07f2-4773-8c50-a41e6550aad7" />
